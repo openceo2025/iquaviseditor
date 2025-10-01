@@ -1,0 +1,273 @@
+Option Explicit
+
+' 認証済みクライアントを保持したい場合はモジュール変数にしておく
+Private mClient As IQuavisClient
+
+
+Private Sub CommandButton_cansel_Click()
+    Me.Hide
+End Sub
+
+
+Private Sub CommandButton1_ok_Click()
+    Static inProgress As Boolean
+    If inProgress Then Exit Sub
+    inProgress = True
+    Me.Hide
+    Call Login
+    inProgress = False
+End Sub
+
+Private Sub UserForm_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
+    Select Case KeyCode
+        Case vbKeyReturn
+            KeyCode = 0
+            CommandButton1_ok.value = True       ' ← cmdOK → 実際の名前へ
+        Case vbKeyEscape
+            KeyCode = 0
+            CommandButton_cansel.value = True    ' ← cmdCancel → 実際の名前へ
+    End Select
+End Sub
+
+
+Public Sub Login()
+    On Error GoTo Failed
+
+    Set mClient = CreateClient("http://rdgpm0701/iquavis-api", True)
+    Debug.Print "[Login] BaseUrl=" & mClient.BaseUrl
+
+    AuthenticateClient mClient, Me.TextBox_ID, Me.TextBox1_Pass
+    Debug.Print "[Login] token length=" & Len(mClient.AccessToken)
+
+    Debug.Print "[Login] call LoadProjectsAndTasks"
+    LoadProjectsAndTasks mClient
+    Exit Sub
+
+Failed:
+    MsgBox "ログインまたはデータ取得に失敗しました: " & Err.Description, vbCritical
+End Sub
+
+Private Sub LoadProjectsAndTasks(ByVal client As IQuavisClient)
+    ' --- プロジェクト取得（値代入。Setは使わない） ---
+    Dim raw As Variant
+    Set raw = FetchProjects(client)
+    Debug.Print "[Load] raw IsObject=" & CStr(IsObject(raw)) & ", Type=" & TypeName(raw)
+
+    ' --- Collection に正規化 ---
+    Dim projectList As Collection
+    Set projectList = ToCollection(raw)
+    Debug.Print "[Load] projectList.Count=" & IIf(projectList Is Nothing, -1, projectList.count)
+
+    If projectList Is Nothing Or projectList.count = 0 Then
+        MsgBox "プロジェクトを取得できませんでした。", vbExclamation
+        Exit Sub
+    End If
+
+    Dim flatProjects As Collection: Set flatProjects = New Collection
+    Dim editableProjects As Collection: Set editableProjects = New Collection
+
+    ' --- 各プロジェクトをフラット化 ---
+    Dim idx As Long: idx = 0
+    Dim project As Variant
+    For Each project In projectList
+        idx = idx + 1
+        Debug.Print "[Load] #" & idx & " project Type=" & TypeName(project)
+
+        Dim flat As Scripting.Dictionary
+        On Error GoTo FlatErr
+        Set flat = FlattenDictionary(project)
+        On Error GoTo 0
+
+        Debug.Print "[Load] #" & idx & " flat.Count=" & flat.count
+        If flat.Exists("Permissions") Then
+            Debug.Print "[Load] #" & idx & " flat('Permissions') Type=" & TypeName(flat("Permissions"))
+        End If
+
+        ' 権限判定と格納
+        Dim canEdit As Boolean
+        canEdit = HasEditAuthority(flat)
+        flat("HasEditPermission") = IIf(canEdit, "TRUE", "FALSE")
+        flatProjects.Add flat
+        If canEdit Then editableProjects.Add project
+
+        GoTo FlatCont
+
+FlatErr:
+        Debug.Print "[Load][ERR] FlattenDictionary: " & Err.Number & " " & Err.Description
+        Err.Clear
+        ' このプロジェクトはスキップ
+FlatCont:
+        On Error GoTo 0
+    Next project
+
+    ' --- 行列化（ワークシート出力用） ---
+    Dim projectRows As Variant
+    projectRows = BuildProjectRows(flatProjects)
+    If IsArray(projectRows) Then
+        Debug.Print "[Load] projectRows shape=(" & _
+            LBound(projectRows, 1) & ":" & UBound(projectRows, 1) & "," & _
+            LBound(projectRows, 2) & ":" & UBound(projectRows, 2) & ")"
+    ElseIf IsEmpty(projectRows) Then
+        Debug.Print "[Load] projectRows is Empty"
+    Else
+        Debug.Print "[Load] projectRows Type=" & TypeName(projectRows)
+    End If
+
+    ' --- 出力対象プロジェクトの選定 ---
+    Dim sampleProject As Object
+    If editableProjects.count > 0 Then
+        Set sampleProject = editableProjects.item(1)
+    Else
+        Set sampleProject = projectList.item(1)
+    End If
+
+    ' --- エクスポート ---
+    Dim exportedCount As Long
+    exportedCount = ExportTasksToWorkbook( _
+                        client, _
+                        sampleProject, _
+                        ThisWorkbook, _
+                        Array("Assigns", "TaskBarStyle", "Todos", "OutputPlanDeliverables", "Progress"), _
+                        Empty, _
+                        projectRows)
+
+    MsgBox "project シートに " & flatProjects.count & " 件のプロジェクトを出力し、""" & _
+           GetProjectName(sampleProject) & """ のタスクを " & exportedCount & " 件書き出しました。", _
+           vbInformation
+End Sub
+
+
+
+
+' project の JSON に含まれる編集可フラグらしきキーを総当たりで判定
+Private Function HasEditAuthority(ByVal flat As Scripting.Dictionary) As Boolean
+    Dim candidates As Variant
+    candidates = Array( _
+        "CanEdit", "Editable", "IsEditable", "HasEditPermission", _
+        "Permissions.CanEdit", "Permissions.Editable", "Permissions.Edit", _
+        "Privileges.Edit", "Privilege.Edit", "Rights.Edit")
+
+    Dim key As Variant
+    For Each key In candidates
+        If flat.Exists(key) Then
+            If NormalizeTruthValue(flat(key)) Then
+                HasEditAuthority = True
+                Exit Function
+            End If
+        End If
+    Next key
+
+    ' 念のため Permissions などが JSON 文字列で来た場合も簡易チェック
+    If flat.Exists("Permissions") Then
+        Debug.Print "[HasEditAuthority] Permissions Type=" & TypeName(flat("Permissions"))
+        Dim serialized As String
+        serialized = LCase$(SafeStringifyJson(flat("Permissions")))  ' ← 安全なシリアライズに変更
+        HasEditAuthority = (InStr(serialized, "edit") > 0)
+    End If
+End Function
+
+' TRUE／FALSE 相当の値をゆるく判定するヘルパー
+Private Function NormalizeTruthValue(ByVal value As Variant) As Boolean
+    If IsObject(value) Or IsError(value) Or IsNull(value) Or IsEmpty(value) Then Exit Function
+
+    Select Case VarType(value)
+        Case vbBoolean
+            NormalizeTruthValue = value
+        Case vbByte, vbInteger, vbLong, vbSingle, vbDouble, vbCurrency
+            NormalizeTruthValue = (CDbl(value) <> 0)
+        Case vbString
+            Dim token As String
+            token = LCase$(Trim$(CStr(value)))
+            NormalizeTruthValue = (token = "true" Or token = "1" Or token = "yes" Or token = "y")
+    End Select
+End Function
+
+Private Function GetProjectName(ByVal project As Object) As String
+    If project Is Nothing Then Exit Function
+    On Error Resume Next
+    GetProjectName = CStr(project("Name"))
+    If Len(GetProjectName) = 0 Then GetProjectName = CStr(project("name"))
+    If Len(GetProjectName) = 0 Then GetProjectName = CStr(project("ProjectName"))
+    On Error GoTo 0
+End Function
+
+Private Function SafeStringifyJson(ByVal v As Variant) As String
+    On Error GoTo fail
+
+    If IsObject(v) Then
+        ' 代表的な入れ物型のみ明示対応（他は安全に CStr を試みる）
+        If TypeOf v Is Scripting.Dictionary Then
+            Dim d As Scripting.Dictionary: Set d = v
+            Dim k As Variant, s As String
+            s = "{"
+            For Each k In d.keys
+                s = s & """" & Replace$(CStr(k), """", """""") & """:"
+                s = s & SafeStringifyJson(d(k)) & ","
+            Next
+            If Right$(s, 1) = "," Then s = Left$(s, Len(s) - 1)
+            s = s & "}"
+            SafeStringifyJson = s
+
+        ElseIf TypeName(v) = "Collection" Then
+            Dim i As Long, arr As String
+            arr = "["
+            For i = 1 To v.count
+                arr = arr & SafeStringifyJson(v.item(i)) & ","
+            Next
+            If Right$(arr, 1) = "," Then arr = Left$(arr, Len(arr) - 1)
+            arr = arr & "]"
+            SafeStringifyJson = arr
+
+        Else
+            ' 不明なオブジェクト：既定メンバ評価エラーを避けつつ可能なら文字列化
+            On Error Resume Next
+            SafeStringifyJson = CStr(v)
+            If Err.Number <> 0 Then SafeStringifyJson = ""
+            On Error GoTo 0
+        End If
+
+    Else
+        Select Case VarType(v)
+            Case vbString
+                SafeStringifyJson = """" & Replace$(CStr(v), """", """""") & """"
+            Case vbBoolean
+                SafeStringifyJson = IIf(CBool(v), "true", "false")
+            Case vbNull, vbEmpty
+                SafeStringifyJson = "null"
+            Case Else
+                SafeStringifyJson = CStr(v)
+        End Select
+    End If
+    Exit Function
+
+fail:
+    SafeStringifyJson = ""
+End Function
+
+Private Function ToCollection(ByVal v As Variant) As Collection
+    Dim c As Collection
+    Set c = New Collection
+
+    If IsObject(v) Then
+        If TypeName(v) = "Collection" Then
+            Set ToCollection = v
+            Exit Function
+        ElseIf TypeOf v Is Scripting.Dictionary Then
+            Dim k As Variant
+            For Each k In v.keys
+                c.Add v(k)
+            Next
+        Else
+            c.Add v
+        End If
+    ElseIf IsArray(v) Then
+        Dim i As Long
+        For i = LBound(v) To UBound(v)
+            c.Add v(i)
+        Next
+    Else
+        c.Add v
+    End If
+
+    Set ToCollection = c
+End Function
