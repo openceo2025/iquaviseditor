@@ -1,0 +1,7 @@
+Private Sub Worksheet_Activate()
+frmIQuavisLauncher.Show vbModeless
+End Sub
+
+Private Sub Worksheet_Deactivate()
+frmIQuavisLauncher.Hide
+End Sub

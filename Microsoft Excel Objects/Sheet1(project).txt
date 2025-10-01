@@ -1,0 +1,8 @@
+Private Sub Worksheet_Activate()
+frmProject.Show vbModeless
+End Sub
+
+Private Sub Worksheet_Deactivate()
+frmProject.Show vbModeless
+End Sub
+
