@@ -1,0 +1,56 @@
+Option Explicit
+
+Private Const TOKEN_LIFETIME_MINUTES As Long = 25
+
+Private mAuthenticatedClient As IQuavisClient
+Private mTokenExpiresAt As Date
+
+Public Function EnsureAuthenticatedClient() As IQuavisClient
+    If Not IsClientValid(mAuthenticatedClient) Then
+        If Not frmLogin.RequestLogin Then
+            Err.Raise vbObjectError + 3000, "EnsureAuthenticatedClient", "ログインがキャンセルされました。"
+        End If
+    End If
+
+    Set EnsureAuthenticatedClient = mAuthenticatedClient
+End Function
+
+Public Sub SetAuthenticatedClient(ByVal client As IQuavisClient, Optional ByVal expiresInSeconds As Variant)
+    If client Is Nothing Then
+        Set mAuthenticatedClient = Nothing
+        mTokenExpiresAt = 0
+        Exit Sub
+    End If
+
+    Set mAuthenticatedClient = client
+
+    If Not IsMissing(expiresInSeconds) Then
+        If IsNumeric(expiresInSeconds) Then
+            mTokenExpiresAt = DateAdd("s", CLng(expiresInSeconds), Now)
+        Else
+            mTokenExpiresAt = DateAdd("n", TOKEN_LIFETIME_MINUTES, Now)
+        End If
+    Else
+        mTokenExpiresAt = DateAdd("n", TOKEN_LIFETIME_MINUTES, Now)
+    End If
+End Sub
+
+Public Sub ClearAuthenticatedClient()
+    Set mAuthenticatedClient = Nothing
+    mTokenExpiresAt = 0
+End Sub
+
+Public Function CurrentClient() As IQuavisClient
+    Set CurrentClient = mAuthenticatedClient
+End Function
+
+Public Function IsClientValid(ByVal client As IQuavisClient) As Boolean
+    If client Is Nothing Then Exit Function
+    If LenB(client.AccessToken) = 0 Then Exit Function
+
+    If mTokenExpiresAt = 0 Then
+        IsClientValid = True
+    Else
+        IsClientValid = (Now < mTokenExpiresAt)
+    End If
+End Function
