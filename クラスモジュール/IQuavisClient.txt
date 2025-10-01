@@ -18,7 +18,7 @@ Private mDebug As Boolean
 
 Private Sub Class_Initialize()
     mBaseUrl = DEFAULT_BASE_URL
-    mTimeoutSeconds = 600
+    mTimeoutSeconds = 6000
     mDebug = False
 End Sub
 
@@ -516,5 +516,6 @@ Private Function EncodeUriComponent(ByVal value As String) As String
         End Select
     Next i
 End Function
+
 
 
