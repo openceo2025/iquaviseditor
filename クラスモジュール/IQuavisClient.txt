@@ -98,20 +98,57 @@ Public Function Login(ByVal userId As String, ByVal password As String) As Strin
 End Function
 
 Public Function ListProjects(Optional ByVal nameFilter As String) As Variant
-    Dim params As Scripting.Dictionary
-    Set params = New Scripting.Dictionary
-    If Len(Trim$(nameFilter)) > 0 Then
-        params.Add "name", nameFilter
-    End If
+    Const PAGE_SIZE As Long = 1000
 
-    Dim jsonResponse As Variant
-    Set jsonResponse = ExecuteJsonRequest("GET", "/v1/projects", params, Empty)
+    Dim aggregated As Collection
+    Set aggregated = New Collection
 
-   If IsObject(jsonResponse) Then
-       Set ListProjects = jsonResponse
-   Else
-       ListProjects = Empty
-   End If
+    Dim offset As Long
+    Dim totalCount As Long
+
+    Do
+        Dim params As Scripting.Dictionary
+        Set params = New Scripting.Dictionary
+        If Len(Trim$(nameFilter)) > 0 Then
+            params.Add "name", nameFilter
+        End If
+        params("offset") = CStr(offset)
+        params("count") = CStr(PAGE_SIZE)
+
+        Dim responseHeaders As Scripting.Dictionary
+        Set responseHeaders = New Scripting.Dictionary
+        responseHeaders.CompareMode = TextCompare
+
+        Dim jsonResponse As Variant
+        Set jsonResponse = ExecuteJsonRequest("GET", "/v1/projects", params, Empty, responseHeaders)
+
+        Dim pageCount As Long
+        pageCount = 0
+
+        If IsObject(jsonResponse) Then
+            Dim project As Variant
+            For Each project In jsonResponse
+                aggregated.Add project
+                pageCount = pageCount + 1
+            Next project
+        End If
+
+        If totalCount = 0 Then
+            totalCount = ParseHeaderLong(responseHeaders, "X-Total-Count")
+        End If
+
+        If pageCount = 0 Then Exit Do
+
+        offset = offset + pageCount
+
+        If totalCount > 0 Then
+            If aggregated.Count >= totalCount Then Exit Do
+        ElseIf pageCount < PAGE_SIZE Then
+            Exit Do
+        End If
+    Loop
+
+    Set ListProjects = aggregated
 End Function
 
 Public Function ListTasks(ByVal projectId As String, _
@@ -240,7 +277,8 @@ End Function
 Private Function ExecuteJsonRequest(ByVal method As String, _
                                     ByVal path As String, _
                                     ByVal params As Scripting.Dictionary, _
-                                    ByVal body As Variant) As Variant
+                                    ByVal body As Variant, _
+                                    Optional ByVal responseHeaders As Scripting.Dictionary) As Variant
     Dim http As Object
     Set http = CreateHttpClient()
 
@@ -279,6 +317,10 @@ Private Function ExecuteJsonRequest(ByVal method As String, _
 
     EnsureSuccess http, method & " " & path & " failed"
 
+    If Not responseHeaders Is Nothing Then
+        PopulateResponseHeaders http, responseHeaders
+    End If
+
     Dim responseText As String
     responseText = CStr(http.responseText)
 
@@ -294,6 +336,58 @@ Private Function ExecuteJsonRequest(ByVal method As String, _
             Set ExecuteJsonRequest = parsed              ' ← 返す側も Set
         End If
     End If
+End Function
+
+Private Sub PopulateResponseHeaders(ByVal http As Object, ByVal headers As Scripting.Dictionary)
+    If headers Is Nothing Then Exit Sub
+
+    Dim rawHeaders As String
+    On Error Resume Next
+    headers.RemoveAll
+    headers.CompareMode = TextCompare
+    rawHeaders = CStr(http.getAllResponseHeaders())
+    Dim errNumber As Long
+    errNumber = Err.Number
+    On Error GoTo 0
+
+    If errNumber <> 0 Then Exit Sub
+    If Len(rawHeaders) = 0 Then Exit Sub
+
+    Dim lines() As String
+    lines = Split(rawHeaders, vbCrLf)
+
+    Dim line As Variant
+    For Each line In lines
+        Dim trimmed As String
+        trimmed = Trim$(CStr(line))
+        If Len(trimmed) = 0 Then GoTo NextLine
+
+        Dim pos As Long
+        pos = InStr(trimmed, ":")
+        If pos <= 0 Then GoTo NextLine
+
+        Dim key As String
+        key = Trim$(Left$(trimmed, pos - 1))
+        If Len(key) = 0 Then GoTo NextLine
+
+        Dim value As String
+        value = Trim$(Mid$(trimmed, pos + 1))
+        headers(key) = value
+NextLine:
+    Next line
+End Sub
+
+Private Function ParseHeaderLong(ByVal headers As Scripting.Dictionary, ByVal key As String) As Long
+    If headers Is Nothing Then Exit Function
+    If Not headers.Exists(key) Then Exit Function
+
+    Dim valueText As String
+    valueText = Trim$(CStr(headers(key)))
+    If Len(valueText) = 0 Then Exit Function
+
+    On Error Resume Next
+    ParseHeaderLong = CLng(valueText)
+    On Error GoTo 0
 End Function
 
 Private Function BuildUrl(ByVal path As String) As String
