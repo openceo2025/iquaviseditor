@@ -149,25 +149,21 @@ Public Function LoadProjectsFromWorksheet(ByVal ws As Worksheet) As Variant
     Set LoadProjectsFromWorksheet = rows
 End Function
 
-Public Function ExportTasksToWorkbook(ByVal client As IQuavisClient, _
-                                      ByVal project As Variant, _
-                                      ByVal targetWorkbook As Workbook, _
-                                      Optional ByVal includes As Variant, _
-                                      Optional ByVal extraHeaders As Variant, _
-                                      Optional ByVal projectRows As Variant) As Long
-                                      
+Public Function ExportTasksToWorksheet(ByVal client As IQuavisClient, _
+                                       ByVal project As Variant, _
+                                       ByVal targetWorksheet As Worksheet, _
+                                       Optional ByVal includes As Variant, _
+                                       Optional ByVal extraHeaders As Variant) As Long
+
     Debug.Print "[Export] enter"
     Debug.Print "[Export] project Type=" & TypeName(project)
     Debug.Print "[Export] includes Missing?=" & CStr(IsMissing(includes)) & _
                 ", Type=" & IIf(IsMissing(includes), "N/A", TypeName(includes))
     Debug.Print "[Export] extraHeaders Missing?=" & CStr(IsMissing(extraHeaders)) & _
                 ", Type=" & IIf(IsMissing(extraHeaders), "N/A", TypeName(extraHeaders))
-    Debug.Print "[Export] projectRows Missing?=" & CStr(IsMissing(projectRows)) & _
-                ", Empty?=" & CStr(IIf(IsMissing(projectRows), True, IsEmpty(projectRows))) & _
-                ", Type=" & IIf(IsMissing(projectRows), "N/A", TypeName(projectRows))
-                                      
-    If client Is Nothing Then Err.Raise vbObjectError + 2001, "ExportTasksToWorkbook", "client が Nothing です。"
-    If targetWorkbook Is Nothing Then Err.Raise vbObjectError + 2002, "ExportTasksToWorkbook", "targetWorkbook が指定されていません。"
+
+    If client Is Nothing Then Err.Raise vbObjectError + 2001, "ExportTasksToWorksheet", "client が Nothing です。"
+    If targetWorksheet Is Nothing Then Err.Raise vbObjectError + 2002, "ExportTasksToWorksheet", "出力先ワークシートが指定されていません。"
 
     Dim identity As Variant
     identity = client.ProjectIdentity(project)
@@ -176,7 +172,7 @@ Public Function ExportTasksToWorkbook(ByVal client As IQuavisClient, _
     projectId = identity(0)
     projectName = identity(1)
 
-    If Len(projectId) = 0 Then Err.Raise vbObjectError + 2003, "ExportTasksToWorkbook", "プロジェクト ID を解決できません。"
+    If Len(projectId) = 0 Then Err.Raise vbObjectError + 2003, "ExportTasksToWorksheet", "プロジェクト ID を解決できません。"
 
     Dim tasks As Variant
     Set tasks = client.ListTasks(projectId, , includes)
@@ -200,9 +196,9 @@ Public Function ExportTasksToWorkbook(ByVal client As IQuavisClient, _
         Set headers = CollectHeaders(flatRows, extraHeaders)
     End If
 
-    PopulateWorkbookWithTasks targetWorkbook, flatRows, headers, projectRows
+    WriteTasksToWorksheet targetWorksheet, headers, flatRows
 
-    ExportTasksToWorkbook = flatRows.count
+    ExportTasksToWorksheet = flatRows.count
 End Function
 
 Public Function ApplyTaskUpdates(ByVal client As IQuavisClient, _

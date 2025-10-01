@@ -1,0 +1,359 @@
+Option Explicit
+
+Private Const PROJECT_SHEET_NAME As String = "project"
+Private Const TASK_TEMPLATE_SHEET_NAME As String = "tasks_template"
+
+Public Sub UpdateProjectInformation()
+    On Error GoTo Failed
+
+    Dim client As IQuavisClient
+    Set client = EnsureAuthenticatedClient()
+
+    Dim rawProjects As Variant
+    Set rawProjects = FetchProjects(client)
+
+    Dim projectList As Collection
+    Set projectList = ToCollection(rawProjects)
+
+    Dim ws As Worksheet
+    Set ws = EnsureProjectSheet()
+    ws.Cells.ClearContents
+
+    If projectList Is Nothing Or projectList.Count = 0 Then
+        MsgBox "編集可能なプロジェクトが見つかりませんでした。", vbInformation
+        Exit Sub
+    End If
+
+    Dim editable As New Collection
+    Dim project As Variant
+    For Each project In projectList
+        Dim flat As Scripting.Dictionary
+        On Error Resume Next
+        Set flat = FlattenDictionary(project)
+        If Err.Number <> 0 Then
+            Err.Clear
+            On Error GoTo 0
+            GoTo ContinueLoop
+        End If
+        On Error GoTo 0
+
+        Dim identity As Variant
+        identity = client.ProjectIdentity(project)
+        Dim projectId As String
+        projectId = identity(0)
+        Dim projectName As String
+        projectName = identity(1)
+
+        flat("ProjectId") = projectId
+        If Len(projectId) > 0 Then flat("Id") = projectId
+        If Len(projectName) > 0 Then
+            If Not flat.Exists("Name") Or Len(Trim$(CStr(flat("Name")))) = 0 Then
+                flat("Name") = projectName
+            End If
+            flat("ProjectName") = projectName
+        End If
+
+        If HasEditAuthority(flat) Then
+            flat("HasEditPermission") = "TRUE"
+            editable.Add flat
+        End If
+ContinueLoop:
+    Next project
+
+    If editable.Count = 0 Then
+        MsgBox "編集権限のあるプロジェクトが見つかりませんでした。", vbInformation
+        Exit Sub
+    End If
+
+    Dim projectRows As Variant
+    projectRows = BuildProjectRows(editable)
+
+    If IsArray(projectRows) Then
+        Dim lowerRow As Long, upperRow As Long
+        Dim lowerCol As Long, upperCol As Long
+        lowerRow = LBound(projectRows, 1)
+        upperRow = UBound(projectRows, 1)
+        lowerCol = LBound(projectRows, 2)
+        upperCol = UBound(projectRows, 2)
+        ws.Range(ws.Cells(lowerRow, lowerCol), ws.Cells(upperRow, upperCol)).Value = projectRows
+    End If
+
+    MsgBox "project シートを更新しました。", vbInformation
+    Exit Sub
+
+Failed:
+    MsgBox "プロジェクト情報の更新に失敗しました: " & Err.Description, vbCritical
+End Sub
+
+Public Sub ExportSelectedProjectTasks()
+    On Error GoTo Failed
+
+    Dim wsProject As Worksheet
+    Set wsProject = EnsureProjectSheet()
+
+    Dim targetRow As Long
+    targetRow = ResolveSelectedRow(wsProject)
+    If targetRow <= 1 Then Err.Raise vbObjectError + 3100, "ExportSelectedProjectTasks", "ヘッダー行は選択できません。"
+
+    Dim projectData As Scripting.Dictionary
+    Set projectData = ReadProjectRow(wsProject, targetRow)
+
+    Dim client As IQuavisClient
+    Set client = EnsureAuthenticatedClient()
+
+    Dim identity As Variant
+    identity = client.ProjectIdentity(projectData)
+
+    Dim projectId As String
+    projectId = identity(0)
+    If Len(Trim$(projectId)) = 0 Then Err.Raise vbObjectError + 3101, "ExportSelectedProjectTasks", "ProjectId を特定できません。"
+
+    Dim projectName As String
+    projectName = identity(1)
+    If Len(Trim$(projectName)) = 0 Then
+        If projectData.Exists("Name") Then projectName = CStr(projectData("Name"))
+    End If
+    If Len(Trim$(projectName)) = 0 Then
+        If projectData.Exists("ProjectName") Then projectName = CStr(projectData("ProjectName"))
+    End If
+
+    Dim targetSheet As Worksheet
+    Set targetSheet = CloneTasksTemplate(ThisWorkbook, projectName)
+
+    Dim exportedCount As Long
+    exportedCount = ExportTasksToWorksheet( _
+                        client, _
+                        projectData, _
+                        targetSheet, _
+                        Array("Assigns", "TaskBarStyle", "Todos", "OutputPlanDeliverables", "Progress") _
+                    )
+
+    MsgBox "シート """ & targetSheet.Name & """ に " & exportedCount & " 件のタスクを出力しました。", vbInformation
+    Exit Sub
+
+Failed:
+    MsgBox "タスクの書き出しに失敗しました: " & Err.Description, vbCritical
+End Sub
+
+Private Function EnsureProjectSheet() As Worksheet
+    On Error GoTo Failed
+    Set EnsureProjectSheet = ThisWorkbook.Worksheets(PROJECT_SHEET_NAME)
+    Exit Function
+Failed:
+    Err.Raise vbObjectError + 3200, "EnsureProjectSheet", "project シートを取得できませんでした。"
+End Function
+
+Private Function ResolveSelectedRow(ByVal ws As Worksheet) As Long
+    Dim selectionRange As Range
+
+    On Error Resume Next
+    Set selectionRange = ws.Parent.Application.Selection
+    On Error GoTo 0
+
+    If selectionRange Is Nothing Then
+        Err.Raise vbObjectError + 3201, "ResolveSelectedRow", "project シートの行を選択してください。"
+    End If
+
+    If TypeName(selectionRange) <> "Range" Then
+        Err.Raise vbObjectError + 3202, "ResolveSelectedRow", "行を特定できません。"
+    End If
+
+    If Not selectionRange.Worksheet Is ws Then
+        Err.Raise vbObjectError + 3203, "ResolveSelectedRow", "project シート上のセルを選択してください。"
+    End If
+
+    ResolveSelectedRow = selectionRange.Row
+End Function
+
+Private Function ReadProjectRow(ByVal ws As Worksheet, ByVal rowIndex As Long) As Scripting.Dictionary
+    Dim headers As Range
+    Set headers = ws.Rows(1)
+
+    Dim colCount As Long
+    colCount = headers.Columns.Count
+
+    Dim result As Scripting.Dictionary
+    Set result = New Scripting.Dictionary
+    result.CompareMode = TextCompare
+
+    Dim colIndex As Long
+    For colIndex = 1 To colCount
+        Dim headerText As String
+        headerText = Trim$(CStr(headers.Cells(1, colIndex).Value))
+        If Len(headerText) = 0 Then GoTo ContinueLoop
+
+        Dim cellValue As Variant
+        cellValue = ws.Cells(rowIndex, colIndex).Value
+        result(headerText) = cellValue
+ContinueLoop:
+    Next colIndex
+
+    Set ReadProjectRow = result
+End Function
+
+Private Function ToCollection(ByVal v As Variant) As Collection
+    Dim c As Collection
+    Set c = New Collection
+
+    If IsObject(v) Then
+        If v Is Nothing Then
+            Set ToCollection = c
+            Exit Function
+        End If
+
+        If TypeName(v) = "Collection" Then
+            Set ToCollection = v
+            Exit Function
+        ElseIf TypeOf v Is Scripting.Dictionary Then
+            Dim key As Variant
+            For Each key In v.Keys
+                c.Add v(key)
+            Next key
+        Else
+            c.Add v
+        End If
+    ElseIf IsArray(v) Then
+        Dim i As Long
+        For i = LBound(v) To UBound(v)
+            c.Add v(i)
+        Next i
+    ElseIf Not IsEmpty(v) Then
+        c.Add v
+    End If
+
+    Set ToCollection = c
+End Function
+
+Private Function HasEditAuthority(ByVal flat As Scripting.Dictionary) As Boolean
+    If flat Is Nothing Then Exit Function
+
+    Dim candidates As Variant
+    candidates = Array( _
+        "CanEdit", "Editable", "IsEditable", "HasEditPermission", _
+        "Permissions.CanEdit", "Permissions.Editable", "Permissions.Edit", _
+        "Privileges.Edit", "Privilege.Edit", "Rights.Edit")
+
+    Dim key As Variant
+    For Each key In candidates
+        If flat.Exists(key) Then
+            If NormalizeTruthValue(flat(key)) Then
+                HasEditAuthority = True
+                Exit Function
+            End If
+        End If
+    Next key
+
+    If flat.Exists("Permissions") Then
+        Dim serialized As String
+        serialized = LCase$(SafeConvertToJson(flat("Permissions")))
+        If InStr(serialized, "edit") > 0 Then HasEditAuthority = True
+    End If
+End Function
+
+Private Function NormalizeTruthValue(ByVal value As Variant) As Boolean
+    If IsObject(value) Or IsError(value) Or IsNull(value) Or IsEmpty(value) Then Exit Function
+
+    Select Case VarType(value)
+        Case vbBoolean
+            NormalizeTruthValue = value
+        Case vbByte, vbInteger, vbLong, vbSingle, vbDouble, vbCurrency
+            NormalizeTruthValue = (CDbl(value) <> 0)
+        Case vbString
+            Dim token As String
+            token = LCase$(Trim$(CStr(value)))
+            NormalizeTruthValue = (token = "true" Or token = "1" Or token = "yes" Or token = "y")
+    End Select
+End Function
+
+Private Function CloneTasksTemplate(ByVal wb As Workbook, ByVal projectName As String) As Worksheet
+    Dim templateSheet As Worksheet
+    Dim originalVisibility As XlSheetVisibility
+
+    On Error GoTo CleanFail
+    Set templateSheet = wb.Worksheets(TASK_TEMPLATE_SHEET_NAME)
+    originalVisibility = templateSheet.Visible
+
+    templateSheet.Visible = xlSheetVisible
+    templateSheet.Copy After:=wb.Worksheets(wb.Worksheets.Count)
+
+    Set CloneTasksTemplate = wb.Worksheets(wb.Worksheets.Count)
+    CloneTasksTemplate.Visible = xlSheetVisible
+    CloneTasksTemplate.Name = GenerateUniqueSheetName(wb, projectName)
+
+    templateSheet.Visible = originalVisibility
+    Exit Function
+
+CleanFail:
+    On Error Resume Next
+    If Not templateSheet Is Nothing Then templateSheet.Visible = originalVisibility
+    On Error GoTo 0
+
+    If Err.Number = 9 Then
+        Err.Raise vbObjectError + 3300, "CloneTasksTemplate", "tasks_template シートが見つかりません。"
+    Else
+        Err.Raise Err.Number, "CloneTasksTemplate", Err.Description
+    End If
+End Function
+
+Private Function GenerateUniqueSheetName(ByVal wb As Workbook, ByVal projectName As String) As String
+    Dim baseName As String
+    baseName = SanitizeSheetName(projectName)
+
+    Dim candidate As String
+    candidate = baseName
+
+    Dim counter As Long
+    counter = 1
+    Do While SheetExists(wb, candidate)
+        candidate = TruncateForSuffix(baseName, counter)
+        counter = counter + 1
+    Loop
+
+    GenerateUniqueSheetName = candidate
+End Function
+
+Private Function TruncateForSuffix(ByVal baseName As String, ByVal counter As Long) As String
+    Dim suffix As String
+    suffix = " (" & counter & ")"
+
+    Dim maxLength As Long
+    maxLength = 31 - Len(suffix)
+    If maxLength < 1 Then maxLength = 1
+
+    TruncateForSuffix = Left$(baseName, maxLength) & suffix
+End Function
+
+Private Function SanitizeSheetName(ByVal name As String) As String
+    Dim sanitized As String
+    sanitized = Trim$(name)
+
+    sanitized = Replace(sanitized, "\\", "_")
+    sanitized = Replace(sanitized, "/", "_")
+    sanitized = Replace(sanitized, "?", "_")
+    sanitized = Replace(sanitized, "*", "_")
+    sanitized = Replace(sanitized, "[", "_")
+    sanitized = Replace(sanitized, "]", "_")
+    sanitized = Replace(sanitized, ":", "_")
+    sanitized = Replace(sanitized, Chr$(34), "_")
+    sanitized = Replace(sanitized, "'", "’")
+
+    If Len(sanitized) = 0 Then sanitized = "project"
+    If Len(sanitized) > 31 Then sanitized = Left$(sanitized, 31)
+
+    Do While Len(sanitized) > 0 And Right$(sanitized, 1) = " "
+        sanitized = Left$(sanitized, Len(sanitized) - 1)
+    Loop
+
+    If Len(sanitized) = 0 Then sanitized = "project"
+
+    SanitizeSheetName = sanitized
+End Function
+
+Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
+    Dim wsCandidate As Worksheet
+    On Error Resume Next
+    Set wsCandidate = wb.Worksheets(sheetName)
+    SheetExists = Not wsCandidate Is Nothing
+    Set wsCandidate = Nothing
+    On Error GoTo 0
+End Function
