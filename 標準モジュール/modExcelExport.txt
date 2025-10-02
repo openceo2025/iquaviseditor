@@ -82,10 +82,13 @@ End Function
 
 Private Function RemoveIllegalCharacters(ByVal text As String) As String
     Dim i As Long
-    Dim code As Integer
+    Dim code As Long
     Dim builder As String
     For i = 1 To Len(text)
-        code = Asc(Mid$(text, i, 1))
+        code = AscW(Mid$(text, i, 1))
+        If code < 0 Then
+            code = code + 65536
+        End If
         If code = 9 Or code = 10 Or code = 13 Or code >= 32 Then
             builder = builder & Mid$(text, i, 1)
         End If
