@@ -412,7 +412,11 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                 loweredKey = LCase$(CStr(key))
 
                 Dim item As Variant
-                item = value(key)
+                If IsObject(value(key)) Then
+                    Set item = value(key)
+                Else
+                    item = value(key)
+                End If
 
                 If KeySuggestsEdit(loweredKey) Then
                     If NormalizeTruthValue(item) Then
