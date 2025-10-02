@@ -1,7 +1,108 @@
+Option Explicit
+
+Private Const SHEET_PWD As String = ""
+
 Private Sub Worksheet_Activate()
-frmIQuavisLauncher.Show vbModeless
+    frmProject.Hide
+    frmIQuavisLauncher.Show vbModeless
 End Sub
 
 Private Sub Worksheet_Deactivate()
-frmIQuavisLauncher.Hide
+    frmIQuavisLauncher.Hide
+End Sub
+
+' 変更セルを黄色
+Private Sub Worksheet_Change(ByVal target As Range)
+    Dim wasProtected As Boolean
+    Dim rng As Range
+
+    On Error GoTo ExitHandler
+    If Intersect(target, Me.UsedRange) Is Nothing Then Exit Sub
+
+    wasProtected = (Me.ProtectContents Or Me.ProtectDrawingObjects Or Me.ProtectScenarios)
+
+    Application.EnableEvents = False
+    If wasProtected Then Me.Unprotect Password:=SHEET_PWD
+
+    For Each rng In target.Cells
+        rng.Interior.Color = RGB(255, 255, 0)  ' ← Color に統一
+    Next rng
+
+ExitHandler:
+    On Error Resume Next
+    If wasProtected Then Me.Protect Password:=SHEET_PWD, AllowFormattingCells:=True
+    Application.EnableEvents = True
+End Sub
+
+' 互換エイリアス（既存ボタン名対策）
+Public Sub ResetFill_ThisSheet(Optional ByVal includeAllCells As Boolean = True)
+    InitializeSheetAppearance
+End Sub
+
+' === 初期化：全セルの塗りつぶし解除＋行高/列幅を既定に戻す ===
+Public Sub InitializeSheetAppearance()
+    Dim prevEv As Boolean, prevScr As Boolean
+    Dim wasProtected As Boolean, unprotected As Boolean
+
+    On Error GoTo Finally
+
+    prevEv = Application.EnableEvents
+    prevScr = Application.ScreenUpdating
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    ' 保護されていれば可能な範囲で一時解除（パスなし想定）
+    wasProtected = (Me.ProtectContents Or Me.ProtectDrawingObjects Or Me.ProtectScenarios)
+    If wasProtected Then
+        On Error Resume Next
+        Me.Unprotect               ' パス付きなら失敗する → そのまま続行せず脱出
+        unprotected = (Err.Number = 0)
+        On Error GoTo Finally
+        If Not unprotected Then Err.Raise vbObjectError + 1, , "シートが保護されているため初期化できません。"
+    End If
+
+    ' 1) 塗りつぶし解除（全セル）
+    Me.Cells.Interior.Pattern = xlNone
+
+    ' 2) 行の高さを既定に
+    '    StandardHeight は読み取り専用だが値は使える
+    Me.Rows.RowHeight = Me.StandardHeight
+
+    ' 3) 列幅を既定に
+    '    StandardWidth は設定可能（列幅の既定値そのもの）
+    Me.Columns.ColumnWidth = Me.StandardWidth
+
+Finally:
+    On Error Resume Next
+    If wasProtected And unprotected Then
+        ' パス不明でも UI だけ許可して再保護可（必要なら Password:= を指定）
+        Me.Protect UserInterfaceOnly:=True
+    End If
+    Application.EnableEvents = prevEv
+    Application.ScreenUpdating = prevScr
+End Sub
+
+' パス付き保護の環境向け（必要なら使用）
+Public Sub InitializeSheetAppearanceWithPassword(ByVal pwd As String)
+    Dim prevEv As Boolean, prevScr As Boolean
+    On Error GoTo Finally
+
+    prevEv = Application.EnableEvents
+    prevScr = Application.ScreenUpdating
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    If (Me.ProtectContents Or Me.ProtectDrawingObjects Or Me.ProtectScenarios) Then
+        Me.Unprotect Password:=pwd
+    End If
+
+    Me.Cells.Interior.Pattern = xlNone
+    Me.Rows.RowHeight = Me.StandardHeight
+    Me.Columns.ColumnWidth = Me.StandardWidth
+
+Finally:
+    On Error Resume Next
+    Me.Protect Password:=pwd, UserInterfaceOnly:=True
+    Application.EnableEvents = prevEv
+    Application.ScreenUpdating = prevScr
 End Sub
