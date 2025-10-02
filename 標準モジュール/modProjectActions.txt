@@ -358,8 +358,17 @@ Private Function ResolveTaskEditPermission(ByVal client As IQuavisClient, _
     On Error GoTo Failed
 
     Dim projectRights As Variant
-    projectRights = client.GetProjectRights(projectId)
-    If IsObject(projectRights) Then
+    Dim projectRightsAssignError As Long
+
+    On Error Resume Next
+    Set projectRights = client.GetProjectRights(projectId)
+    projectRightsAssignError = Err.Number
+    Err.Clear
+    On Error GoTo Failed
+
+    If projectRightsAssignError <> 0 Then
+        projectRights = client.GetProjectRights(projectId)
+    ElseIf Not projectRights Is Nothing Then
         Dim projectRightsFlat As Scripting.Dictionary
         Set projectRightsFlat = FlattenDictionary(projectRights, "ProjectRights")
         If Not projectRightsFlat Is Nothing Then
@@ -368,7 +377,17 @@ Private Function ResolveTaskEditPermission(ByVal client As IQuavisClient, _
     End If
 
     Dim datasetRights As Variant
-    datasetRights = client.GetDatasetRights(projectId, "Task")
+    Dim datasetRightsAssignError As Long
+
+    On Error Resume Next
+    Set datasetRights = client.GetDatasetRights(projectId, "Task")
+    datasetRightsAssignError = Err.Number
+    Err.Clear
+    On Error GoTo Failed
+
+    If datasetRightsAssignError <> 0 Then
+        datasetRights = client.GetDatasetRights(projectId, "Task")
+    End If
 
     Dim datasetCollection As Collection
     Set datasetCollection = ToCollection(datasetRights)
