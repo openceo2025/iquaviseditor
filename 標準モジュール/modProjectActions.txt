@@ -38,6 +38,10 @@ Public Sub UpdateProjectInformation()
         End If
         On Error GoTo 0
 
+        On Error Resume Next
+        flat.CompareMode = TextCompare
+        On Error GoTo 0
+
         Dim identity As Variant
         identity = client.ProjectIdentity(project)
         Dim projectId As String
@@ -55,7 +59,14 @@ Public Sub UpdateProjectInformation()
         End If
 
         Dim hasEdit As Boolean
-        hasEdit = HasEditAuthority(flat, project)
+        Dim explicitPermission As Variant
+        explicitPermission = ResolveTaskEditPermission(client, projectId, flat)
+
+        If IsNull(explicitPermission) Then
+            hasEdit = HasEditAuthority(flat, project)
+        Else
+            hasEdit = CBool(explicitPermission)
+        End If
 
         If hasEdit Then
             flat("HasEditPermission") = "TRUE"
@@ -333,6 +344,193 @@ Private Function KeySuggestsPermissionContainer(ByVal loweredKey As String) As B
     ElseIf InStr(loweredKey, "role") > 0 And InStr(loweredKey, "roleid") = 0 Then
         KeySuggestsPermissionContainer = True
     End If
+End Function
+
+Private Function ResolveTaskEditPermission(ByVal client As IQuavisClient, _
+                                           ByVal projectId As String, _
+                                           ByVal destination As Scripting.Dictionary) As Variant
+    ResolveTaskEditPermission = Null
+
+    If client Is Nothing Then Exit Function
+    If destination Is Nothing Then Exit Function
+    If Len(Trim$(projectId)) = 0 Then Exit Function
+
+    On Error GoTo Failed
+
+    Dim projectRights As Variant
+    projectRights = client.GetProjectRights(projectId)
+    If IsObject(projectRights) Then
+        Dim projectRightsFlat As Scripting.Dictionary
+        Set projectRightsFlat = FlattenDictionary(projectRights, "ProjectRights")
+        If Not projectRightsFlat Is Nothing Then
+            Call MergeDictionaryValues(destination, projectRightsFlat)
+        End If
+    End If
+
+    Dim datasetRights As Variant
+    datasetRights = client.GetDatasetRights(projectId, "Task")
+
+    Dim datasetCollection As Collection
+    Set datasetCollection = ToCollection(datasetRights)
+
+    Dim editableNames As Collection
+    Set editableNames = New Collection
+
+    Dim hasDeterministicInfo As Boolean
+    hasDeterministicInfo = (datasetCollection.Count = 0)
+
+    Dim dataset As Variant
+    For Each dataset In datasetCollection
+        Dim datasetFlat As Scripting.Dictionary
+        Set datasetFlat = FlattenDictionary(dataset)
+        If datasetFlat Is Nothing Then GoTo ContinueDataset
+
+        Dim updateFlag As Variant
+        updateFlag = ExtractBooleanValue(datasetFlat, Array("Update", _
+                                                           "CanUpdate", _
+                                                           "Editable", _
+                                                           "ActualUpdate", _
+                                                           "AllowUpdate", _
+                                                           "Permissions.Update", _
+                                                           "Permissions.CanUpdate", _
+                                                           "Rights.Update", _
+                                                           "Rights.CanUpdate"))
+
+        If IsNull(updateFlag) Then
+            GoTo ContinueDataset
+        End If
+
+        hasDeterministicInfo = True
+
+        If CBool(updateFlag) Then
+            Dim datasetName As String
+            datasetName = GetFirstNonEmptyText(datasetFlat, Array("Name", _
+                                                                 "DisplayName", _
+                                                                 "DatasetName", _
+                                                                 "Dataset.DisplayName", _
+                                                                 "Dataset.Name", _
+                                                                 "DatasetId", _
+                                                                 "TaskDomainName", _
+                                                                 "TaskDomainId"))
+            If Len(datasetName) > 0 Then editableNames.Add datasetName
+        End If
+
+ContinueDataset:
+    Next dataset
+
+    destination("TaskDatasetRightsRetrieved") = "TRUE"
+    destination("TaskDatasetRightsCount") = datasetCollection.Count
+    destination("TaskDatasetEditableCount") = editableNames.Count
+
+    If editableNames.Count > 0 Then
+        destination("TaskDatasetsEditable") = JoinCollectionText(editableNames, ", ")
+    Else
+        destination("TaskDatasetsEditable") = vbNullString
+    End If
+
+    If hasDeterministicInfo Then
+        If editableNames.Count > 0 Then
+            destination("TaskDatasetUpdatePermission") = "TRUE"
+            ResolveTaskEditPermission = True
+        Else
+            destination("TaskDatasetUpdatePermission") = "FALSE"
+            ResolveTaskEditPermission = False
+        End If
+    Else
+        destination("TaskDatasetUpdatePermission") = "UNKNOWN"
+    End If
+
+    Exit Function
+
+Failed:
+    Debug.Print "[ResolveTaskEditPermission] " & Err.Description
+    Err.Clear
+End Function
+
+Private Sub MergeDictionaryValues(ByRef target As Scripting.Dictionary, ByVal source As Scripting.Dictionary)
+    If target Is Nothing Then Exit Sub
+    If source Is Nothing Then Exit Sub
+
+    Dim key As Variant
+    For Each key In source.Keys
+        target(key) = source(key)
+    Next key
+End Sub
+
+Private Function GetFirstNonEmptyText(ByVal dict As Scripting.Dictionary, ByVal keys As Variant) As String
+    If dict Is Nothing Then Exit Function
+
+    Dim key As Variant
+    For Each key In keys
+        If dict.Exists(key) Then
+            Dim value As Variant
+            value = dict(key)
+            If Not IsObject(value) Then
+                If Not IsNull(value) And Not IsEmpty(value) Then
+                    Dim text As String
+                    text = Trim$(CStr(value))
+                    If Len(text) > 0 Then
+                        GetFirstNonEmptyText = text
+                        Exit Function
+                    End If
+                End If
+            End If
+        End If
+    Next key
+End Function
+
+Private Function ExtractBooleanValue(ByVal dict As Scripting.Dictionary, ByVal keys As Variant) As Variant
+    ExtractBooleanValue = Null
+
+    If dict Is Nothing Then Exit Function
+
+    Dim key As Variant
+    For Each key In keys
+        If dict.Exists(key) Then
+            Dim value As Variant
+            value = dict(key)
+
+            If IsObject(value) Then GoTo ContinueKey
+            If IsNull(value) Then GoTo ContinueKey
+            If IsEmpty(value) Then GoTo ContinueKey
+
+            Select Case VarType(value)
+                Case vbBoolean
+                    ExtractBooleanValue = CBool(value)
+                    Exit Function
+                Case vbByte, vbInteger, vbLong, vbSingle, vbDouble, vbCurrency
+                    ExtractBooleanValue = (CDbl(value) <> 0)
+                    Exit Function
+                Case vbString
+                    Dim token As String
+                    token = LCase$(Trim$(CStr(value)))
+                    Select Case token
+                        Case "true", "1", "yes", "y"
+                            ExtractBooleanValue = True
+                            Exit Function
+                        Case "false", "0", "no", "n"
+                            ExtractBooleanValue = False
+                            Exit Function
+                    End Select
+            End Select
+        End If
+ContinueKey:
+    Next key
+End Function
+
+Private Function JoinCollectionText(ByVal items As Collection, Optional ByVal delimiter As String = ", ") As String
+    If items Is Nothing Then Exit Function
+    If items.Count = 0 Then Exit Function
+
+    Dim parts() As String
+    ReDim parts(0 To items.Count - 1)
+
+    Dim index As Long
+    For index = 1 To items.Count
+        parts(index - 1) = CStr(items(index))
+    Next index
+
+    JoinCollectionText = Join(parts, delimiter)
 End Function
 
 Private Function ContainsEditTokenValue(ByVal value As Variant) As Boolean

@@ -16,6 +16,9 @@ Public Function FlattenDictionary(ByVal obj As Variant, _
                                   Optional ByVal separator As String = SEP_DEFAULT) As Scripting.Dictionary
     Dim result As Scripting.Dictionary
     Set result = New Scripting.Dictionary
+    On Error Resume Next
+    result.CompareMode = TextCompare
+    On Error GoTo 0
 
     If IsObject(obj) Then
         If TypeOf obj Is Scripting.Dictionary Then

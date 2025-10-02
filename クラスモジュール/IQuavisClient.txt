@@ -184,6 +184,49 @@ Public Function ListTasks(ByVal projectId As String, _
    End If
 End Function
 
+Public Function GetProjectRights(ByVal projectId As String) As Variant
+    If Len(Trim$(projectId)) = 0 Then
+        Err.Raise vbObjectError + 1100, TypeName(Me), "projectId は必須です。"
+    End If
+
+    Dim path As String
+    path = "/v1/projects/" & EncodeUriComponent(projectId) & "/projectRights"
+
+    Dim response As Variant
+    Set response = ExecuteJsonRequest("GET", path, Nothing, Empty)
+
+    If IsObject(response) Then
+        Set GetProjectRights = response
+    Else
+        GetProjectRights = response
+    End If
+End Function
+
+Public Function GetDatasetRights(ByVal projectId As String, _
+                                 Optional ByVal datasetType As String = vbNullString) As Variant
+    If Len(Trim$(projectId)) = 0 Then
+        Err.Raise vbObjectError + 1101, TypeName(Me), "projectId は必須です。"
+    End If
+
+    Dim params As Scripting.Dictionary
+    If Len(Trim$(datasetType)) > 0 Then
+        Set params = New Scripting.Dictionary
+        params.Add "DatasetType", datasetType
+    End If
+
+    Dim path As String
+    path = "/v1/projects/" & EncodeUriComponent(projectId) & "/datasetRights"
+
+    Dim response As Variant
+    Set response = ExecuteJsonRequest("GET", path, params, Empty)
+
+    If IsObject(response) Then
+        Set GetDatasetRights = response
+    Else
+        GetDatasetRights = response
+    End If
+End Function
+
 Public Function UpdateTask(ByVal projectId As String, _
                            ByVal taskId As String, _
                            ByVal payload As Variant) As Variant
