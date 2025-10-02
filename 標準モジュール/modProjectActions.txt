@@ -162,6 +162,77 @@ Failed:
     MsgBox "タスクの書き出しに失敗しました: " & Err.Description, vbCritical
 End Sub
 
+Public Sub UpdateActiveSheetTasks()
+    On Error GoTo Failed
+
+    Dim wsTasks As Worksheet
+    Set wsTasks = ActiveSheet
+
+    If wsTasks Is Nothing Then
+        Err.Raise vbObjectError + 3400, "UpdateActiveSheetTasks", "アクティブなシートが見つかりません。"
+    End If
+
+    Dim client As IQuavisClient
+    Set client = EnsureAuthenticatedClient()
+
+    Dim wsOriginal As Worksheet
+    Set wsOriginal = ResolveOriginalWorksheet(wsTasks)
+
+    Dim results As Collection
+    Set results = ApplyTaskUpdates(client, wsTasks, wsOriginal)
+
+    If results Is Nothing Or results.Count = 0 Then
+        MsgBox "黄色セルが含まれるタスクが見つかりませんでした。", vbInformation
+        Exit Sub
+    End If
+
+    Dim summary As String
+    summary = SummarizeResults(results)
+
+    Dim detail As String
+    Dim hasFailure As Boolean
+    Dim item As Scripting.Dictionary
+    For Each item In results
+        Dim succeeded As Boolean
+        If item.Exists("Success") Then succeeded = CBool(item("Success"))
+        If Not succeeded Then hasFailure = True
+
+        Dim rowLabel As String
+        If item.Exists("RowIndex") Then
+            rowLabel = CStr(item("RowIndex"))
+        Else
+            rowLabel = "?"
+        End If
+
+        Dim messageText As String
+        If item.Exists("Message") Then
+            messageText = CStr(item("Message"))
+        ElseIf succeeded Then
+            messageText = "Updated"
+        Else
+            messageText = "Failed"
+        End If
+
+        detail = detail & vbCrLf & "行 " & rowLabel & ": " & messageText
+    Next item
+
+    Dim prompt As String
+    prompt = "タスクの更新が完了しました。" & vbCrLf & summary & detail
+
+    Dim style As VbMsgBoxStyle
+    If hasFailure Then
+        style = vbExclamation
+    Else
+        style = vbInformation
+    End If
+
+    MsgBox prompt, style
+    Exit Sub
+
+Failed:
+    MsgBox "タスクの更新に失敗しました: " & Err.Description, vbCritical
+End Sub
+
 Private Function EnsureProjectSheet() As Worksheet
     On Error GoTo Failed
     Set EnsureProjectSheet = ThisWorkbook.Worksheets(PROJECT_SHEET_NAME)
@@ -190,6 +261,47 @@ Private Function ResolveSelectedRow(ByVal ws As Worksheet) As Long
     End If
 
     ResolveSelectedRow = selectionRange.Row
+End Function
+
+Private Function ResolveOriginalWorksheet(ByVal wsTasks As Worksheet) As Worksheet
+    If wsTasks Is Nothing Then Exit Function
+
+    Dim obj As Object
+
+    On Error Resume Next
+    Set obj = CallByName(wsTasks, "GetOriginalWorksheet", VbMethod)
+    On Error GoTo 0
+
+    If Not obj Is Nothing Then
+        If TypeName(obj) = "Worksheet" Then
+            Set ResolveOriginalWorksheet = obj
+            Exit Function
+        End If
+    End If
+
+    Dim originalName As Variant
+    On Error Resume Next
+    originalName = CallByName(wsTasks, "OriginalWorksheetName", VbGet)
+    On Error GoTo 0
+
+    If VarType(originalName) = vbString Then
+        On Error Resume Next
+        Set ResolveOriginalWorksheet = wsTasks.Parent.Worksheets(CStr(originalName))
+        On Error GoTo 0
+        If Not ResolveOriginalWorksheet Is Nothing Then Exit Function
+    End If
+
+    Dim fallbackName As String
+    fallbackName = wsTasks.Name & "_original"
+    On Error Resume Next
+    Set ResolveOriginalWorksheet = wsTasks.Parent.Worksheets(fallbackName)
+    On Error GoTo 0
+    If Not ResolveOriginalWorksheet Is Nothing Then Exit Function
+
+    fallbackName = wsTasks.Name & " (original)"
+    On Error Resume Next
+    Set ResolveOriginalWorksheet = wsTasks.Parent.Worksheets(fallbackName)
+    On Error GoTo 0
 End Function
 
 Private Function ReadProjectRow(ByVal ws As Worksheet, ByVal rowIndex As Long) As Scripting.Dictionary
