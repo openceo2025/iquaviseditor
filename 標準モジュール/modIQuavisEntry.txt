@@ -198,8 +198,18 @@ Public Function ExportTasksToWorksheet(ByVal client As IQuavisClient, _
 
     WriteTasksToWorksheet targetWorksheet, headers, flatRows
 
+    Call ResetWorksheetFillIfAvailable(targetWorksheet)
+
     ExportTasksToWorksheet = flatRows.count
 End Function
+
+Private Sub ResetWorksheetFillIfAvailable(ByVal ws As Worksheet)
+    If ws Is Nothing Then Exit Sub
+
+    On Error Resume Next
+    CallByName ws, "ResetFill_ThisSheet", VbMethod, False
+    On Error GoTo 0
+End Sub
 
 Public Function ApplyTaskUpdates(ByVal client As IQuavisClient, _
                                  ByVal wsTasks As Worksheet, _
