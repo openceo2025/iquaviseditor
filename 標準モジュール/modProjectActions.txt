@@ -898,9 +898,15 @@ End Function
 
 Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
     Dim wsCandidate As Worksheet
-    On Error Resume Next
-    Set wsCandidate = wb.Worksheets(sheetName)
-    SheetExists = Not wsCandidate Is Nothing
+
+    SheetExists = False
+
+    For Each wsCandidate In wb.Worksheets
+        If StrComp(wsCandidate.Name, sheetName, vbBinaryCompare) = 0 Then
+            SheetExists = True
+            Exit For
+        End If
+    Next wsCandidate
+
     Set wsCandidate = Nothing
-    On Error GoTo 0
 End Function
