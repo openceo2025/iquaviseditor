@@ -25,6 +25,7 @@ Public Sub UpdateProjectInformation()
     End If
 
     Dim editable As New Collection
+    Dim allFlats As New Collection
     Dim project As Variant
     For Each project In projectList
         Dim flat As Scripting.Dictionary
@@ -53,20 +54,35 @@ Public Sub UpdateProjectInformation()
             flat("ProjectName") = projectName
         End If
 
-        If HasEditAuthority(flat) Then
+        Dim hasEdit As Boolean
+        hasEdit = HasEditAuthority(flat, project)
+
+        If hasEdit Then
             flat("HasEditPermission") = "TRUE"
             editable.Add flat
+        Else
+            flat("HasEditPermission") = "FALSE"
         End If
+
+        allFlats.Add flat
 ContinueLoop:
     Next project
 
-    If editable.Count = 0 Then
-        MsgBox "編集権限のあるプロジェクトが見つかりませんでした。", vbInformation
-        Exit Sub
+    Dim sourceRows As Collection
+    If editable.Count > 0 Then
+        Set sourceRows = editable
+    Else
+        Set sourceRows = allFlats
+        If Not sourceRows Is Nothing And sourceRows.Count > 0 Then
+            MsgBox "編集権限の判定ができなかったため、すべてのプロジェクトを表示します。必要なプロジェクトを手動で選択してください。", vbInformation
+        Else
+            MsgBox "編集可能なプロジェクトが見つかりませんでした。", vbInformation
+            Exit Sub
+        End If
     End If
 
     Dim projectRows As Variant
-    projectRows = BuildProjectRows(editable)
+    projectRows = BuildProjectRows(sourceRows)
 
     If IsArray(projectRows) Then
         Dim lowerRow As Long, upperRow As Long
@@ -224,7 +240,7 @@ Private Function ToCollection(ByVal v As Variant) As Collection
     Set ToCollection = c
 End Function
 
-Private Function HasEditAuthority(ByVal flat As Scripting.Dictionary) As Boolean
+Private Function HasEditAuthority(ByVal flat As Scripting.Dictionary, Optional ByVal original As Variant) As Boolean
     If flat Is Nothing Then Exit Function
 
     Dim candidates As Variant
@@ -240,14 +256,212 @@ Private Function HasEditAuthority(ByVal flat As Scripting.Dictionary) As Boolean
                 HasEditAuthority = True
                 Exit Function
             End If
+            If ContainsEditTokenValue(flat(key)) Then
+                HasEditAuthority = True
+                Exit Function
+            End If
         End If
     Next key
 
-    If flat.Exists("Permissions") Then
-        Dim serialized As String
-        serialized = LCase$(SafeConvertToJson(flat("Permissions")))
-        If InStr(serialized, "edit") > 0 Then HasEditAuthority = True
+    For Each key In flat.keys
+        Dim loweredKey As String
+        loweredKey = LCase$(CStr(key))
+
+        If KeySuggestsEdit(loweredKey) Then
+            If NormalizeTruthValue(flat(key)) Then
+                HasEditAuthority = True
+                Exit Function
+            End If
+            If ContainsEditTokenValue(flat(key)) Then
+                HasEditAuthority = True
+                Exit Function
+            End If
+        ElseIf KeySuggestsPermissionContainer(loweredKey) Then
+            If ContainsEditTokenValue(flat(key)) Then
+                HasEditAuthority = True
+                Exit Function
+            End If
+        End If
+    Next key
+
+    If Not IsMissing(original) Then
+        If InspectVariantForEdit(original) Then
+            HasEditAuthority = True
+        End If
     End If
+End Function
+
+Private Function KeySuggestsEdit(ByVal loweredKey As String) As Boolean
+    If Len(loweredKey) = 0 Then Exit Function
+
+    Dim normalized As String
+    normalized = Replace(loweredKey, "_", " ")
+    normalized = Replace(normalized, ".", " ")
+    normalized = Replace(normalized, "-", " ")
+    normalized = Replace(normalized, "/", " ")
+
+    Dim token As Variant
+    Dim parts() As String
+    parts = Split(normalized, " ")
+    For Each token In parts
+        Select Case token
+            Case "edit", "canedit", "iseditable", "editable", "haseditpermission", _
+                 "hasedit", "editpermission", "editproject", "projectedit", _
+                 "taskedit", "editauthority", "editor", "editrights", _
+                 "canupdate", "updatepermission", "updateauthority", _
+                 "canwrite", "writepermission", "writeauthority", "caneditproject", _
+                 "canedittask"
+                KeySuggestsEdit = True
+                Exit Function
+        End Select
+    Next token
+End Function
+
+Private Function KeySuggestsPermissionContainer(ByVal loweredKey As String) As Boolean
+    If Len(loweredKey) = 0 Then Exit Function
+
+    If InStr(loweredKey, "permission") > 0 Then
+        KeySuggestsPermissionContainer = True
+    ElseIf InStr(loweredKey, "privilege") > 0 Then
+        KeySuggestsPermissionContainer = True
+    ElseIf InStr(loweredKey, "authority") > 0 Then
+        KeySuggestsPermissionContainer = True
+    ElseIf InStr(loweredKey, "availableaction") > 0 Then
+        KeySuggestsPermissionContainer = True
+    ElseIf InStr(loweredKey, "action") > 0 And InStr(loweredKey, "lastaction") = 0 Then
+        KeySuggestsPermissionContainer = True
+    ElseIf InStr(loweredKey, "role") > 0 And InStr(loweredKey, "roleid") = 0 Then
+        KeySuggestsPermissionContainer = True
+    End If
+End Function
+
+Private Function ContainsEditTokenValue(ByVal value As Variant) As Boolean
+    On Error GoTo Fallback
+    Dim serialized As String
+    serialized = LCase$(SafeConvertToJson(value))
+    On Error GoTo 0
+    If ContainsEditTokenText(serialized) Then
+        ContainsEditTokenValue = True
+    End If
+    Exit Function
+
+Fallback:
+    Err.Clear
+    On Error GoTo 0
+    If IsObject(value) Then Exit Function
+    If IsArray(value) Then Exit Function
+    If IsError(value) Then Exit Function
+    If VarType(value) = vbNull Then Exit Function
+
+    Dim text As String
+    text = LCase$(Trim$(CStr(value)))
+    ContainsEditTokenValue = ContainsEditTokenText(text)
+End Function
+
+Private Function ContainsEditTokenText(ByVal text As String) As Boolean
+    If Len(text) = 0 Then Exit Function
+
+    Dim tokens As Variant
+    tokens = Array("""edit""", """editor""", """editproject""", """projectedit""", _
+                   """taskedit""", """task_edit""", """project_edit""", "canedit", _
+                   "iseditable", "editable", "editpermission", "editauthority", _
+                   "hasedit", "haseditpermission", "editrights", "edit_project", _
+                   "task_edit", "project_edit", """canupdate""", "canupdate", _
+                   "updatepermission", "updateauthority", """update""", _
+                   """canwrite""", "canwrite", "writepermission", "writeauthority", _
+                   "caneditproject", "canedittask")
+
+    Dim token As Variant
+    For Each token In tokens
+        If InStr(text, token) > 0 Then
+            ContainsEditTokenText = True
+            Exit Function
+        End If
+    Next token
+
+    Dim cleaned As String
+    cleaned = Replace(text, "_", " ")
+    cleaned = Replace(cleaned, ".", " ")
+    cleaned = Replace(cleaned, "-", " ")
+    cleaned = Replace(cleaned, "/", " ")
+    cleaned = Replace(cleaned, ",", " ")
+    cleaned = Replace(cleaned, ":", " ")
+
+    Dim part As Variant
+    Dim parts() As String
+    parts = Split(cleaned, " ")
+    For Each part In parts
+        Select Case part
+            Case "edit", "editor", "editable", "canedit", "editproject", "projectedit", _
+                 "taskedit", "canupdate", "update", "canwrite", "write", "updatepermission", _
+                 "writepermission", "updateauthority", "writeauthority"
+                ContainsEditTokenText = True
+                Exit Function
+        End Select
+    Next part
+End Function
+
+Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
+    On Error GoTo CleanFail
+
+    If IsObject(value) Then
+        If TypeOf value Is Scripting.Dictionary Then
+            Dim key As Variant
+            For Each key In value.keys
+                Dim loweredKey As String
+                loweredKey = LCase$(CStr(key))
+
+                Dim item As Variant
+                item = value(key)
+
+                If KeySuggestsEdit(loweredKey) Then
+                    If NormalizeTruthValue(item) Then
+                        InspectVariantForEdit = True
+                        Exit Function
+                    End If
+                    If ContainsEditTokenValue(item) Then
+                        InspectVariantForEdit = True
+                        Exit Function
+                    End If
+                ElseIf KeySuggestsPermissionContainer(loweredKey) Then
+                    If ContainsEditTokenValue(item) Then
+                        InspectVariantForEdit = True
+                        Exit Function
+                    End If
+                End If
+
+                If InspectVariantForEdit(item) Then
+                    InspectVariantForEdit = True
+                    Exit Function
+                End If
+            Next key
+        ElseIf TypeOf value Is Collection Then
+            Dim element As Variant
+            For Each element In value
+                If InspectVariantForEdit(element) Then
+                    InspectVariantForEdit = True
+                    Exit Function
+                End If
+            Next element
+        Else
+            InspectVariantForEdit = ContainsEditTokenValue(value)
+        End If
+    ElseIf IsArray(value) Then
+        Dim i As Long
+        For i = LBound(value) To UBound(value)
+            If InspectVariantForEdit(value(i)) Then
+                InspectVariantForEdit = True
+                Exit Function
+            End If
+        Next i
+    Else
+        InspectVariantForEdit = ContainsEditTokenValue(value)
+    End If
+
+    Exit Function
+
+CleanFail:
+    InspectVariantForEdit = False
 End Function
 
 Private Function NormalizeTruthValue(ByVal value As Variant) As Boolean
