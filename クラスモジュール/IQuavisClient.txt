@@ -294,6 +294,7 @@ Private Function ExecuteJsonRequest(ByVal method As String, _
 
     DebugMessage method & " " & url
 
+    ConfigureHttpTimeouts http
     http.Open method, url, False
     http.setRequestHeader "Content-Type", "application/json"
     If LenB(mAccessToken) > 0 Then
@@ -419,6 +420,15 @@ Private Function BuildQueryString(ByVal params As Scripting.Dictionary) As Strin
     Next key
     BuildQueryString = Join(parts, "&")
 End Function
+
+Private Sub ConfigureHttpTimeouts(ByVal http As Object)
+    Const DEFAULT_TIMEOUT As Long = 180000    ' 180 秒
+
+    On Error Resume Next
+    CallByName http, "setTimeouts", VbMethod, _
+        DEFAULT_TIMEOUT, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT
+    On Error GoTo 0
+End Sub
 
 Private Function CreateHttpClient() As Object
     Dim http As Object
