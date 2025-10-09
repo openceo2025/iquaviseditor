@@ -542,29 +542,29 @@ Private Function TryMaterializeDictionaryValue(ByVal dict As Scripting.Dictionar
         Exit Function
     End If
 
-    Dim itemObject As Object
     Dim getErr As Long
     Dim getDesc As String
 
     On Error Resume Next
-    Set itemObject = dict.Item(key)
+    result = dict.Item(key)
     getErr = Err.Number
     getDesc = Err.Description
     On Error GoTo 0
 
     If getErr = 0 Then
-        Set result = itemObject
         TryMaterializeDictionaryValue = True
         Exit Function
     End If
 
     If getErr = 13 Or getErr = 424 Or getErr = 438 Or getErr = 450 Or getErr = 451 Then
+        Dim itemObject As Object
         On Error Resume Next
-        result = dict.Item(key)
+        Set itemObject = dict.Item(key)
         getErr = Err.Number
         getDesc = Err.Description
         On Error GoTo 0
         If getErr = 0 Then
+            Set result = itemObject
             TryMaterializeDictionaryValue = True
             Exit Function
         End If
