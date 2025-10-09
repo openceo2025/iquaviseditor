@@ -1,8 +1,13 @@
-Private Sub Worksheet_Activate()
-frmProject.Show vbModeless
+Option Explicit
+
+' project情報を更新 button handler
+Private Sub CommandButton_Project_Import_Click()
+    modProjectActions.UpdateProjectInformation
 End Sub
 
-Private Sub Worksheet_Deactivate()
-frmProject.Show vbModeless
+
+' 選択行のプロジェクトのタスクを書き出す button handler
+Private Sub CommandButton_ExportSelectedProjectTasks_Click()
+    modProjectActions.ExportSelectedProjectTasks
 End Sub
 
