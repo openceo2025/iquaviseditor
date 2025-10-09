@@ -89,13 +89,13 @@ Private Sub AppendFlattened(ByRef result As Scripting.Dictionary, _
     End If
 End Sub
 
-Private Sub CopyInto(ByRef Target As Scripting.Dictionary, ByVal source As Scripting.Dictionary)
+Private Sub CopyInto(ByRef target As Scripting.Dictionary, ByVal source As Scripting.Dictionary)
     Dim key As Variant
     For Each key In source.keys
-        If Not Target.Exists(key) Then
-            Target.Add key, source(key)
+        If Not target.Exists(key) Then
+            target.Add key, source(key)
         Else
-            Target(key) = source(key)
+            target(key) = source(key)
         End If
     Next key
 End Sub
@@ -166,6 +166,8 @@ Private Sub QuickSortStrings(ByRef arr As Variant, ByVal first As Long, ByVal la
     Dim i As Long, j As Long
     Dim pivot As String
     Dim temp As Variant
+
+    If last < first Then Exit Sub
 
     i = first
     j = last
@@ -298,3 +300,5 @@ Public Function NormalizeBooleanString(ByVal text As String) As Variant
             NormalizeBooleanString = text
     End Select
 End Function
+
+
