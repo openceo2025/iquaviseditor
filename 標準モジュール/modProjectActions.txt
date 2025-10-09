@@ -478,23 +478,37 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                     Err.Clear
                 End If
                 On Error GoTo CleanFail
+                Exit Function
+            End If
+            On Error GoTo CleanFail
 
                 Dim item As Variant
                 If Not TryMaterializeDictionaryValue(dict, key, item) Then
                     GoTo ContinueDictionaryLoop
                 End If
 
-                If KeySuggestsEdit(loweredKey) Then
-                    If NormalizeTruthValue(item) Then
-                        InspectVariantForEdit = True
-                        Exit Function
+                    Dim item As Variant
+                    If Not TryMaterializeDictionaryValue(dict, key, item) Then
+                        GoTo ContinueDictionaryLoop
                     End If
-                    If ContainsEditTokenValue(item) Then
-                        InspectVariantForEdit = True
-                        Exit Function
+
+                    If KeySuggestsEdit(loweredKey) Then
+                        If NormalizeTruthValue(item) Then
+                            InspectVariantForEdit = True
+                            Exit Function
+                        End If
+                        If ContainsEditTokenValue(item) Then
+                            InspectVariantForEdit = True
+                            Exit Function
+                        End If
+                    ElseIf KeySuggestsPermissionContainer(loweredKey) Then
+                        If ContainsEditTokenValue(item) Then
+                            InspectVariantForEdit = True
+                            Exit Function
+                        End If
                     End If
-                ElseIf KeySuggestsPermissionContainer(loweredKey) Then
-                    If ContainsEditTokenValue(item) Then
+
+                    If InspectVariantForEdit(item) Then
                         InspectVariantForEdit = True
                         Exit Function
                     End If
