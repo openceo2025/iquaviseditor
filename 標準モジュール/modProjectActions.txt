@@ -449,10 +449,9 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
 
     If IsObject(value) Then
         If TypeOf value Is Scripting.Dictionary Then
-            Dim key As Variant
-            For Each key In value.keys
-                Dim loweredKey As String
-                loweredKey = LCase$(CStr(key))
+            Dim dictCount As Long
+            dictCount = value.count
+            If dictCount = 0 Then Exit Function
 
                 Dim item As Variant
                 Dim itemObject As Object
