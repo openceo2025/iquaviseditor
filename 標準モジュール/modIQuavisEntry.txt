@@ -281,3 +281,5 @@ Public Function SummarizeResults(ByVal results As Collection) As String
 
     SummarizeResults = "Total: " & total & " / Success: " & success & " / Failure: " & failure
 End Function
+
+
