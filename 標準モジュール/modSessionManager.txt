@@ -54,3 +54,4 @@ Public Function IsClientValid(ByVal client As IQuavisClient) As Boolean
         IsClientValid = (Now < mTokenExpiresAt)
     End If
 End Function
+
