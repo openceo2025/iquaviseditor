@@ -406,33 +406,55 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
 
     If IsObject(value) Then
         If TypeOf value Is Scripting.Dictionary Then
-            Dim key As Variant
-            For Each key In value.keys
+            Dim dictCount As Long
+            dictCount = value.count
+            If dictCount = 0 Then Exit Function
+
+            Dim keys As Variant
+            Dim items As Variant
+            keys = value.keys
+            items = value.Items
+
+            If Not (IsArray(keys) And IsArray(items)) Then
+                Debug.Print "[InspectVariantForEdit] Dictionary keys/items not array (count=" & dictCount & ")"
+                Exit Function
+            End If
+
+            Dim keyLower As Long
+            Dim keyUpper As Long
+            keyLower = LBound(keys)
+            keyUpper = UBound(keys)
+
+            Dim itemLower As Long
+            Dim itemUpper As Long
+            itemLower = LBound(items)
+            itemUpper = UBound(items)
+
+            Dim index As Long
+            For index = 0 To dictCount - 1
+                If keyLower + index > keyUpper Then
+                    Debug.Print "[InspectVariantForEdit] Key array truncated at index=" & index & " (upper=" & keyUpper & ")"
+                    Exit For
+                End If
+                If itemLower + index > itemUpper Then
+                    Debug.Print "[InspectVariantForEdit] Item array truncated at index=" & index & " (upper=" & itemUpper & ")"
+                    Exit For
+                End If
+
+                Dim key As Variant
+                key = keys(keyLower + index)
+
                 Dim loweredKey As String
-                loweredKey = LCase$(CStr(key))
-
-                Dim item As Variant
-                Dim itemValue As Variant
-                Dim getErr As Long
-                Dim getErrDesc As String
-
                 On Error Resume Next
-                itemValue = value.Item(key)
-                getErr = Err.Number
-                getErrDesc = Err.Description
+                loweredKey = LCase$(CStr(key))
+                If Err.Number <> 0 Then
+                    loweredKey = ""
+                    Err.Clear
+                End If
                 On Error GoTo CleanFail
 
-                If getErr = 0 Then
-                    If IsObject(itemValue) Then
-                        Set item = itemValue
-                    Else
-                        item = itemValue
-                    End If
-                ElseIf getErr = 13 Or getErr = 424 Then ' Type mismatch / Object required -> 非オブジェクト値
-                    item = value.Item(key)
-                Else
-                    Err.Raise getErr, "InspectVariantForEdit", getErrDesc
-                End If
+                Dim item As Variant
+                item = items(itemLower + index)
 
                 If KeySuggestsEdit(loweredKey) Then
                     If NormalizeTruthValue(item) Then
@@ -454,7 +476,7 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                     InspectVariantForEdit = True
                     Exit Function
                 End If
-            Next key
+            Next index
         ElseIf TypeOf value Is Collection Then
             Dim element As Variant
             For Each element In value
