@@ -535,6 +535,34 @@ CleanFail:
     InspectVariantForEdit = False
 End Function
 
+Private Function TryReadDictionaryValue(ByVal dict As Scripting.Dictionary, ByVal key As Variant, ByRef result As Variant) As Boolean
+    On Error GoTo Failed
+
+    result = CallByName(dict, "Item", VbGet, key)
+    TryReadDictionaryValue = True
+    Exit Function
+
+Failed:
+    Debug.Print "[InspectVariantForEdit] Failed to read key=" & KeyDebugString(key) & " err=" & Err.Number & " desc=" & Err.Description
+    Err.Clear
+    TryReadDictionaryValue = False
+End Function
+
+Private Function KeyDebugString(ByVal key As Variant) As String
+    On Error GoTo Failed
+
+    If IsObject(key) Then
+        KeyDebugString = TypeName(key)
+    Else
+        KeyDebugString = CStr(key)
+    End If
+    Exit Function
+
+Failed:
+    KeyDebugString = "(unprintable)"
+    Err.Clear
+End Function
+
 Private Function NormalizeTruthValue(ByVal value As Variant) As Boolean
     If IsObject(value) Or IsError(value) Or IsNull(value) Or IsEmpty(value) Then Exit Function
 
