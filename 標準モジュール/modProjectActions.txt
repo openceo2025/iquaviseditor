@@ -19,7 +19,7 @@ Public Sub UpdateProjectInformation()
     Set ws = EnsureProjectSheet()
     ws.Cells.ClearContents
 
-    If projectList Is Nothing Or projectList.Count = 0 Then
+    If projectList Is Nothing Or projectList.count = 0 Then
         MsgBox "編集可能なプロジェクトが見つかりませんでした。", vbInformation
         Exit Sub
     End If
@@ -36,10 +36,6 @@ Public Sub UpdateProjectInformation()
             On Error GoTo 0
             GoTo ContinueLoop
         End If
-        On Error GoTo 0
-
-        On Error Resume Next
-        flat.CompareMode = TextCompare
         On Error GoTo 0
 
         Dim identity As Variant
@@ -59,14 +55,7 @@ Public Sub UpdateProjectInformation()
         End If
 
         Dim hasEdit As Boolean
-        Dim explicitPermission As Variant
-        explicitPermission = ResolveTaskEditPermission(client, projectId, flat)
-
-        If IsNull(explicitPermission) Then
-            hasEdit = HasEditAuthority(flat, project)
-        Else
-            hasEdit = CBool(explicitPermission)
-        End If
+        hasEdit = HasEditAuthority(flat, project)
 
         If hasEdit Then
             flat("HasEditPermission") = "TRUE"
@@ -80,11 +69,11 @@ ContinueLoop:
     Next project
 
     Dim sourceRows As Collection
-    If editable.Count > 0 Then
+    If editable.count > 0 Then
         Set sourceRows = editable
     Else
         Set sourceRows = allFlats
-        If Not sourceRows Is Nothing And sourceRows.Count > 0 Then
+        If Not sourceRows Is Nothing And sourceRows.count > 0 Then
             MsgBox "編集権限の判定ができなかったため、すべてのプロジェクトを表示します。必要なプロジェクトを手動で選択してください。", vbInformation
         Else
             MsgBox "編集可能なプロジェクトが見つかりませんでした。", vbInformation
@@ -102,7 +91,7 @@ ContinueLoop:
         upperRow = UBound(projectRows, 1)
         lowerCol = LBound(projectRows, 2)
         upperCol = UBound(projectRows, 2)
-        ws.Range(ws.Cells(lowerRow, lowerCol), ws.Cells(upperRow, upperCol)).Value = projectRows
+        ws.Range(ws.Cells(lowerRow, lowerCol), ws.Cells(upperRow, upperCol)).value = projectRows
     End If
 
     MsgBox "project シートを更新しました。", vbInformation
@@ -155,82 +144,11 @@ Public Sub ExportSelectedProjectTasks()
                         Array("Assigns", "TaskBarStyle", "Todos", "OutputPlanDeliverables", "Progress") _
                     )
 
-    MsgBox "シート """ & targetSheet.Name & """ に " & exportedCount & " 件のタスクを出力しました。", vbInformation
+    MsgBox "シート """ & targetSheet.name & """ に " & exportedCount & " 件のタスクを出力しました。", vbInformation
     Exit Sub
 
 Failed:
     MsgBox "タスクの書き出しに失敗しました: " & Err.Description, vbCritical
-End Sub
-
-Public Sub UpdateActiveSheetTasks()
-    On Error GoTo Failed
-
-    Dim wsTasks As Worksheet
-    Set wsTasks = ActiveSheet
-
-    If wsTasks Is Nothing Then
-        Err.Raise vbObjectError + 3400, "UpdateActiveSheetTasks", "アクティブなシートが見つかりません。"
-    End If
-
-    Dim client As IQuavisClient
-    Set client = EnsureAuthenticatedClient()
-
-    Dim wsOriginal As Worksheet
-    Set wsOriginal = ResolveOriginalWorksheet(wsTasks)
-
-    Dim results As Collection
-    Set results = ApplyTaskUpdates(client, wsTasks, wsOriginal)
-
-    If results Is Nothing Or results.Count = 0 Then
-        MsgBox "黄色セルが含まれるタスクが見つかりませんでした。", vbInformation
-        Exit Sub
-    End If
-
-    Dim summary As String
-    summary = SummarizeResults(results)
-
-    Dim detail As String
-    Dim hasFailure As Boolean
-    Dim item As Scripting.Dictionary
-    For Each item In results
-        Dim succeeded As Boolean
-        If item.Exists("Success") Then succeeded = CBool(item("Success"))
-        If Not succeeded Then hasFailure = True
-
-        Dim rowLabel As String
-        If item.Exists("RowIndex") Then
-            rowLabel = CStr(item("RowIndex"))
-        Else
-            rowLabel = "?"
-        End If
-
-        Dim messageText As String
-        If item.Exists("Message") Then
-            messageText = CStr(item("Message"))
-        ElseIf succeeded Then
-            messageText = "Updated"
-        Else
-            messageText = "Failed"
-        End If
-
-        detail = detail & vbCrLf & "行 " & rowLabel & ": " & messageText
-    Next item
-
-    Dim prompt As String
-    prompt = "タスクの更新が完了しました。" & vbCrLf & summary & detail
-
-    Dim style As VbMsgBoxStyle
-    If hasFailure Then
-        style = vbExclamation
-    Else
-        style = vbInformation
-    End If
-
-    MsgBox prompt, style
-    Exit Sub
-
-Failed:
-    MsgBox "タスクの更新に失敗しました: " & Err.Description, vbCritical
 End Sub
 
 Private Function EnsureProjectSheet() As Worksheet
@@ -263,53 +181,12 @@ Private Function ResolveSelectedRow(ByVal ws As Worksheet) As Long
     ResolveSelectedRow = selectionRange.Row
 End Function
 
-Private Function ResolveOriginalWorksheet(ByVal wsTasks As Worksheet) As Worksheet
-    If wsTasks Is Nothing Then Exit Function
-
-    Dim obj As Object
-
-    On Error Resume Next
-    Set obj = CallByName(wsTasks, "GetOriginalWorksheet", VbMethod)
-    On Error GoTo 0
-
-    If Not obj Is Nothing Then
-        If TypeName(obj) = "Worksheet" Then
-            Set ResolveOriginalWorksheet = obj
-            Exit Function
-        End If
-    End If
-
-    Dim originalName As Variant
-    On Error Resume Next
-    originalName = CallByName(wsTasks, "OriginalWorksheetName", VbGet)
-    On Error GoTo 0
-
-    If VarType(originalName) = vbString Then
-        On Error Resume Next
-        Set ResolveOriginalWorksheet = wsTasks.Parent.Worksheets(CStr(originalName))
-        On Error GoTo 0
-        If Not ResolveOriginalWorksheet Is Nothing Then Exit Function
-    End If
-
-    Dim fallbackName As String
-    fallbackName = wsTasks.Name & "_original"
-    On Error Resume Next
-    Set ResolveOriginalWorksheet = wsTasks.Parent.Worksheets(fallbackName)
-    On Error GoTo 0
-    If Not ResolveOriginalWorksheet Is Nothing Then Exit Function
-
-    fallbackName = wsTasks.Name & " (original)"
-    On Error Resume Next
-    Set ResolveOriginalWorksheet = wsTasks.Parent.Worksheets(fallbackName)
-    On Error GoTo 0
-End Function
-
 Private Function ReadProjectRow(ByVal ws As Worksheet, ByVal rowIndex As Long) As Scripting.Dictionary
     Dim headers As Range
-    Set headers = ws.Rows(1)
+    Set headers = ws.rows(1)
 
     Dim colCount As Long
-    colCount = headers.Columns.Count
+    colCount = headers.Columns.count
 
     Dim result As Scripting.Dictionary
     Set result = New Scripting.Dictionary
@@ -318,11 +195,11 @@ Private Function ReadProjectRow(ByVal ws As Worksheet, ByVal rowIndex As Long) A
     Dim colIndex As Long
     For colIndex = 1 To colCount
         Dim headerText As String
-        headerText = Trim$(CStr(headers.Cells(1, colIndex).Value))
+        headerText = Trim$(CStr(headers.Cells(1, colIndex).value))
         If Len(headerText) = 0 Then GoTo ContinueLoop
 
         Dim cellValue As Variant
-        cellValue = ws.Cells(rowIndex, colIndex).Value
+        cellValue = ws.Cells(rowIndex, colIndex).value
         result(headerText) = cellValue
 ContinueLoop:
     Next colIndex
@@ -345,7 +222,7 @@ Private Function ToCollection(ByVal v As Variant) As Collection
             Exit Function
         ElseIf TypeOf v Is Scripting.Dictionary Then
             Dim key As Variant
-            For Each key In v.Keys
+            For Each key In v.keys
                 c.Add v(key)
             Next key
         Else
@@ -458,212 +335,6 @@ Private Function KeySuggestsPermissionContainer(ByVal loweredKey As String) As B
     End If
 End Function
 
-Private Function ResolveTaskEditPermission(ByVal client As IQuavisClient, _
-                                           ByVal projectId As String, _
-                                           ByVal destination As Scripting.Dictionary) As Variant
-    ResolveTaskEditPermission = Null
-
-    If client Is Nothing Then Exit Function
-    If destination Is Nothing Then Exit Function
-    If Len(Trim$(projectId)) = 0 Then Exit Function
-
-    On Error GoTo Failed
-
-    Dim projectRights As Variant
-    Dim projectRightsAssignError As Long
-
-    On Error Resume Next
-    Set projectRights = client.GetProjectRights(projectId)
-    projectRightsAssignError = Err.Number
-    Err.Clear
-    On Error GoTo Failed
-
-    If projectRightsAssignError <> 0 Then
-        projectRights = client.GetProjectRights(projectId)
-    ElseIf Not projectRights Is Nothing Then
-        Dim projectRightsFlat As Scripting.Dictionary
-        Set projectRightsFlat = FlattenDictionary(projectRights, "ProjectRights")
-        If Not projectRightsFlat Is Nothing Then
-            Call MergeDictionaryValues(destination, projectRightsFlat)
-        End If
-    End If
-
-    Dim datasetRights As Variant
-    Dim datasetRightsAssignError As Long
-
-    On Error Resume Next
-    Set datasetRights = client.GetDatasetRights(projectId, "Task")
-    datasetRightsAssignError = Err.Number
-    Err.Clear
-    On Error GoTo Failed
-
-    If datasetRightsAssignError <> 0 Then
-        datasetRights = client.GetDatasetRights(projectId, "Task")
-    End If
-
-    Dim datasetCollection As Collection
-    Set datasetCollection = ToCollection(datasetRights)
-
-    Dim editableNames As Collection
-    Set editableNames = New Collection
-
-    Dim hasDeterministicInfo As Boolean
-    hasDeterministicInfo = (datasetCollection.Count = 0)
-
-    Dim dataset As Variant
-    For Each dataset In datasetCollection
-        Dim datasetFlat As Scripting.Dictionary
-        Set datasetFlat = FlattenDictionary(dataset)
-        If datasetFlat Is Nothing Then GoTo ContinueDataset
-
-        Dim updateFlag As Variant
-        updateFlag = ExtractBooleanValue(datasetFlat, Array("Update", _
-                                                           "CanUpdate", _
-                                                           "Editable", _
-                                                           "ActualUpdate", _
-                                                           "AllowUpdate", _
-                                                           "Permissions.Update", _
-                                                           "Permissions.CanUpdate", _
-                                                           "Rights.Update", _
-                                                           "Rights.CanUpdate"))
-
-        If IsNull(updateFlag) Then
-            GoTo ContinueDataset
-        End If
-
-        hasDeterministicInfo = True
-
-        If CBool(updateFlag) Then
-            Dim datasetName As String
-            datasetName = GetFirstNonEmptyText(datasetFlat, Array("Name", _
-                                                                 "DisplayName", _
-                                                                 "DatasetName", _
-                                                                 "Dataset.DisplayName", _
-                                                                 "Dataset.Name", _
-                                                                 "DatasetId", _
-                                                                 "TaskDomainName", _
-                                                                 "TaskDomainId"))
-            If Len(datasetName) > 0 Then editableNames.Add datasetName
-        End If
-
-ContinueDataset:
-    Next dataset
-
-    destination("TaskDatasetRightsRetrieved") = "TRUE"
-    destination("TaskDatasetRightsCount") = datasetCollection.Count
-    destination("TaskDatasetEditableCount") = editableNames.Count
-
-    If editableNames.Count > 0 Then
-        destination("TaskDatasetsEditable") = JoinCollectionText(editableNames, ", ")
-    Else
-        destination("TaskDatasetsEditable") = vbNullString
-    End If
-
-    If hasDeterministicInfo Then
-        If editableNames.Count > 0 Then
-            destination("TaskDatasetUpdatePermission") = "TRUE"
-            ResolveTaskEditPermission = True
-        Else
-            destination("TaskDatasetUpdatePermission") = "FALSE"
-            ResolveTaskEditPermission = False
-        End If
-    Else
-        destination("TaskDatasetUpdatePermission") = "UNKNOWN"
-    End If
-
-    Exit Function
-
-Failed:
-    Debug.Print "[ResolveTaskEditPermission] " & Err.Description
-    Err.Clear
-End Function
-
-Private Sub MergeDictionaryValues(ByRef target As Scripting.Dictionary, ByVal source As Scripting.Dictionary)
-    If target Is Nothing Then Exit Sub
-    If source Is Nothing Then Exit Sub
-
-    Dim key As Variant
-    For Each key In source.Keys
-        target(key) = source(key)
-    Next key
-End Sub
-
-Private Function GetFirstNonEmptyText(ByVal dict As Scripting.Dictionary, ByVal keys As Variant) As String
-    If dict Is Nothing Then Exit Function
-
-    Dim key As Variant
-    For Each key In keys
-        If dict.Exists(key) Then
-            Dim value As Variant
-            value = dict(key)
-            If Not IsObject(value) Then
-                If Not IsNull(value) And Not IsEmpty(value) Then
-                    Dim text As String
-                    text = Trim$(CStr(value))
-                    If Len(text) > 0 Then
-                        GetFirstNonEmptyText = text
-                        Exit Function
-                    End If
-                End If
-            End If
-        End If
-    Next key
-End Function
-
-Private Function ExtractBooleanValue(ByVal dict As Scripting.Dictionary, ByVal keys As Variant) As Variant
-    ExtractBooleanValue = Null
-
-    If dict Is Nothing Then Exit Function
-
-    Dim key As Variant
-    For Each key In keys
-        If dict.Exists(key) Then
-            Dim value As Variant
-            value = dict(key)
-
-            If IsObject(value) Then GoTo ContinueKey
-            If IsNull(value) Then GoTo ContinueKey
-            If IsEmpty(value) Then GoTo ContinueKey
-
-            Select Case VarType(value)
-                Case vbBoolean
-                    ExtractBooleanValue = CBool(value)
-                    Exit Function
-                Case vbByte, vbInteger, vbLong, vbSingle, vbDouble, vbCurrency
-                    ExtractBooleanValue = (CDbl(value) <> 0)
-                    Exit Function
-                Case vbString
-                    Dim token As String
-                    token = LCase$(Trim$(CStr(value)))
-                    Select Case token
-                        Case "true", "1", "yes", "y"
-                            ExtractBooleanValue = True
-                            Exit Function
-                        Case "false", "0", "no", "n"
-                            ExtractBooleanValue = False
-                            Exit Function
-                    End Select
-            End Select
-        End If
-ContinueKey:
-    Next key
-End Function
-
-Private Function JoinCollectionText(ByVal items As Collection, Optional ByVal delimiter As String = ", ") As String
-    If items Is Nothing Then Exit Function
-    If items.Count = 0 Then Exit Function
-
-    Dim parts() As String
-    ReDim parts(0 To items.Count - 1)
-
-    Dim index As Long
-    For index = 1 To items.Count
-        parts(index - 1) = CStr(items(index))
-    Next index
-
-    JoinCollectionText = Join(parts, delimiter)
-End Function
-
 Private Function ContainsEditTokenValue(ByVal value As Variant) As Boolean
     On Error GoTo Fallback
     Dim serialized As String
@@ -741,11 +412,7 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                 loweredKey = LCase$(CStr(key))
 
                 Dim item As Variant
-                If IsObject(value(key)) Then
-                    Set item = value(key)
-                Else
-                    item = value(key)
-                End If
+                item = value(key)
 
                 If KeySuggestsEdit(loweredKey) Then
                     If NormalizeTruthValue(item) Then
@@ -821,11 +488,11 @@ Private Function CloneTasksTemplate(ByVal wb As Workbook, ByVal projectName As S
     originalVisibility = templateSheet.Visible
 
     templateSheet.Visible = xlSheetVisible
-    templateSheet.Copy After:=wb.Worksheets(wb.Worksheets.Count)
+    templateSheet.Copy After:=wb.Worksheets(wb.Worksheets.count)
 
-    Set CloneTasksTemplate = wb.Worksheets(wb.Worksheets.Count)
+    Set CloneTasksTemplate = wb.Worksheets(wb.Worksheets.count)
     CloneTasksTemplate.Visible = xlSheetVisible
-    CloneTasksTemplate.Name = GenerateUniqueSheetName(wb, projectName)
+    CloneTasksTemplate.name = GenerateUniqueSheetName(wb, projectName)
 
     templateSheet.Visible = originalVisibility
     Exit Function
@@ -898,15 +565,15 @@ End Function
 
 Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
     Dim wsCandidate As Worksheet
-
-    SheetExists = False
+   SheetExists = False
 
     For Each wsCandidate In wb.Worksheets
-        If StrComp(wsCandidate.Name, sheetName, vbBinaryCompare) = 0 Then
+        If StrComp(wsCandidate.name, sheetName, vbBinaryCompare) = 0 Then
             SheetExists = True
             Exit For
         End If
     Next wsCandidate
-
     Set wsCandidate = Nothing
 End Function
+
+
