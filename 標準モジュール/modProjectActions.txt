@@ -406,32 +406,40 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
 
     If IsObject(value) Then
         If TypeOf value Is Scripting.Dictionary Then
+            Dim dictCount As Long
+            dictCount = value.count
+            If dictCount = 0 Then Exit Function
+
+            Dim keys As Variant
+            On Error Resume Next
+            keys = value.keys
+            If Err.Number <> 0 Then
+                Debug.Print "[InspectVariantForEdit] Failed to materialize Keys (count=" & dictCount & ") err=" & Err.Number & " desc=" & Err.Description
+                Err.Clear
+                On Error GoTo CleanFail
+                Exit Function
+            End If
+            On Error GoTo CleanFail
+
+            If Not IsArray(keys) Then
+                Debug.Print "[InspectVariantForEdit] Keys not array (count=" & dictCount & ")"
+                Exit Function
+            End If
+
             Dim key As Variant
-            For Each key In value.keys
+            For Each key In keys
                 Dim loweredKey As String
-                loweredKey = LCase$(CStr(key))
-
-                Dim item As Variant
-                Dim itemValue As Variant
-                Dim getErr As Long
-                Dim getErrDesc As String
-
                 On Error Resume Next
-                itemValue = value.Item(key)
-                getErr = Err.Number
-                getErrDesc = Err.Description
+                loweredKey = LCase$(CStr(key))
+                If Err.Number <> 0 Then
+                    loweredKey = ""
+                    Err.Clear
+                End If
                 On Error GoTo CleanFail
 
-                If getErr = 0 Then
-                    If IsObject(itemValue) Then
-                        Set item = itemValue
-                    Else
-                        item = itemValue
-                    End If
-                ElseIf getErr = 13 Or getErr = 424 Then ' Type mismatch / Object required -> 非オブジェクト値
-                    item = value.Item(key)
-                Else
-                    Err.Raise getErr, "InspectVariantForEdit", getErrDesc
+                Dim item As Variant
+                If Not TryReadDictionaryValue(value, key, item) Then
+                    GoTo ContinueDictionaryLoop
                 End If
 
                 If KeySuggestsEdit(loweredKey) Then
@@ -454,6 +462,7 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                     InspectVariantForEdit = True
                     Exit Function
                 End If
+ContinueDictionaryLoop:
             Next key
         ElseIf TypeOf value Is Collection Then
             Dim element As Variant
@@ -482,6 +491,34 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
 
 CleanFail:
     InspectVariantForEdit = False
+End Function
+
+Private Function TryReadDictionaryValue(ByVal dict As Scripting.Dictionary, ByVal key As Variant, ByRef result As Variant) As Boolean
+    On Error GoTo Failed
+
+    result = CallByName(dict, "Item", VbGet, key)
+    TryReadDictionaryValue = True
+    Exit Function
+
+Failed:
+    Debug.Print "[InspectVariantForEdit] Failed to read key=" & KeyDebugString(key) & " err=" & Err.Number & " desc=" & Err.Description
+    Err.Clear
+    TryReadDictionaryValue = False
+End Function
+
+Private Function KeyDebugString(ByVal key As Variant) As String
+    On Error GoTo Failed
+
+    If IsObject(key) Then
+        KeyDebugString = TypeName(key)
+    Else
+        KeyDebugString = CStr(key)
+    End If
+    Exit Function
+
+Failed:
+    KeyDebugString = "(unprintable)"
+    Err.Clear
 End Function
 
 Private Function NormalizeTruthValue(ByVal value As Variant) As Boolean
