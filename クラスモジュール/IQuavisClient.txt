@@ -142,7 +142,7 @@ Public Function ListProjects(Optional ByVal nameFilter As String) As Variant
         offset = offset + pageCount
 
         If totalCount > 0 Then
-            If aggregated.Count >= totalCount Then Exit Do
+            If aggregated.count >= totalCount Then Exit Do
         ElseIf pageCount < PAGE_SIZE Then
             Exit Do
         End If
@@ -569,6 +569,8 @@ Private Function EncodeUriComponent(ByVal value As String) As String
         End Select
     Next i
 End Function
+
+
 
 
 
