@@ -412,19 +412,23 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                 loweredKey = LCase$(CStr(key))
 
                 Dim item As Variant
-                Dim objectItem As Object
+                Dim itemValue As Variant
                 Dim getErr As Long
                 Dim getErrDesc As String
 
                 On Error Resume Next
-                Set objectItem = value.Item(key)
+                itemValue = value.Item(key)
                 getErr = Err.Number
                 getErrDesc = Err.Description
                 On Error GoTo CleanFail
 
                 If getErr = 0 Then
-                    Set item = objectItem
-                ElseIf getErr = 13 Then ' Type mismatch -> 非オブジェクト値
+                    If IsObject(itemValue) Then
+                        Set item = itemValue
+                    Else
+                        item = itemValue
+                    End If
+                ElseIf getErr = 13 Or getErr = 424 Then ' Type mismatch / Object required -> 非オブジェクト値
                     item = value.Item(key)
                 Else
                     Err.Raise getErr, "InspectVariantForEdit", getErrDesc
