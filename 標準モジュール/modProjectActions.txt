@@ -412,24 +412,32 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                 loweredKey = LCase$(CStr(key))
 
                 Dim item As Variant
-                Dim itemValue As Variant
+                Dim itemObject As Object
                 Dim getErr As Long
                 Dim getErrDesc As String
 
+                ' Scripting.Dictionary の Item にはオブジェクトが格納されている場合と
+                ' プリミティブ値が格納されている場合がある。先に Set で取得を試み、
+                ' オブジェクトではないときに発生する型不一致や 450 系のエラーは値として
+                ' 取り直す。これにより API の応答に配列/辞書が含まれていても安全に走査できる。
                 On Error Resume Next
-                itemValue = value.Item(key)
+                Set itemObject = value.Item(key)
                 getErr = Err.Number
                 getErrDesc = Err.Description
                 On Error GoTo CleanFail
 
                 If getErr = 0 Then
-                    If IsObject(itemValue) Then
-                        Set item = itemValue
-                    Else
-                        item = itemValue
-                    End If
-                ElseIf getErr = 13 Or getErr = 424 Then ' Type mismatch / Object required -> 非オブジェクト値
+                    Set item = itemObject
+                ElseIf getErr = 13 Or getErr = 91 Or getErr = 424 Or _
+                       getErr = 438 Or getErr = 450 Or getErr = 451 Then
+                    On Error Resume Next
                     item = value.Item(key)
+                    getErr = Err.Number
+                    getErrDesc = Err.Description
+                    On Error GoTo CleanFail
+                    If getErr <> 0 Then
+                        Err.Raise getErr, "InspectVariantForEdit", getErrDesc
+                    End If
                 Else
                     Err.Raise getErr, "InspectVariantForEdit", getErrDesc
                 End If
