@@ -405,57 +405,83 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
     On Error GoTo CleanFail
 
     If IsObject(value) Then
-        If TypeOf value Is Scripting.Dictionary Then
-            Dim key As Variant
-            For Each key In value.keys
-                Dim loweredKey As String
-                loweredKey = LCase$(CStr(key))
+        Dim objectType As String
+        objectType = TypeName(value)
 
-                Dim item As Variant
-                Dim itemValue As Variant
-                Dim getErr As Long
-                Dim getErrDesc As String
+        If objectType = "Nothing" Then Exit Function
 
-                On Error Resume Next
-                itemValue = value.Item(key)
-                getErr = Err.Number
-                getErrDesc = Err.Description
+        If objectType = "Dictionary" Or objectType = "Scripting.Dictionary" Then
+            Dim dict As Scripting.Dictionary
+            On Error Resume Next
+            Set dict = value
+            If Err.Number <> 0 Then
+                Debug.Print "[InspectVariantForEdit] Failed to cast dictionary err=" & Err.Number & " desc=" & Err.Description
+                Err.Clear
                 On Error GoTo CleanFail
+                Exit Function
+            End If
+            On Error GoTo CleanFail
 
-                If getErr = 0 Then
-                    If IsObject(itemValue) Then
-                        Set item = itemValue
-                    Else
-                        item = itemValue
+            If dict Is Nothing Then Exit Function
+            If dict.count = 0 Then Exit Function
+
+            Dim keys As Variant
+            On Error Resume Next
+            keys = dict.Keys
+            If Err.Number <> 0 Then
+                Debug.Print "[InspectVariantForEdit] Failed to enumerate keys err=" & Err.Number & " desc=" & Err.Description
+                Err.Clear
+                On Error GoTo CleanFail
+                Exit Function
+            End If
+            On Error GoTo CleanFail
+
+            If IsArray(keys) Then
+                Dim keyIndex As Long
+                For keyIndex = LBound(keys) To UBound(keys)
+                    Dim key As Variant
+                    key = keys(keyIndex)
+
+                    Dim loweredKey As String
+                    On Error Resume Next
+                    loweredKey = LCase$(CStr(key))
+                    If Err.Number <> 0 Then
+                        loweredKey = ""
+                        Err.Clear
                     End If
-                ElseIf getErr = 13 Or getErr = 424 Then ' Type mismatch / Object required -> 非オブジェクト値
-                    item = value.Item(key)
-                Else
-                    Err.Raise getErr, "InspectVariantForEdit", getErrDesc
-                End If
+                    On Error GoTo CleanFail
 
-                If KeySuggestsEdit(loweredKey) Then
-                    If NormalizeTruthValue(item) Then
+                    Dim item As Variant
+                    If Not TryMaterializeDictionaryValue(dict, key, item) Then
+                        GoTo ContinueDictionaryLoop
+                    End If
+
+                    If KeySuggestsEdit(loweredKey) Then
+                        If NormalizeTruthValue(item) Then
+                            InspectVariantForEdit = True
+                            Exit Function
+                        End If
+                        If ContainsEditTokenValue(item) Then
+                            InspectVariantForEdit = True
+                            Exit Function
+                        End If
+                    ElseIf KeySuggestsPermissionContainer(loweredKey) Then
+                        If ContainsEditTokenValue(item) Then
+                            InspectVariantForEdit = True
+                            Exit Function
+                        End If
+                    End If
+
+                    If InspectVariantForEdit(item) Then
                         InspectVariantForEdit = True
                         Exit Function
                     End If
-                    If ContainsEditTokenValue(item) Then
-                        InspectVariantForEdit = True
-                        Exit Function
-                    End If
-                ElseIf KeySuggestsPermissionContainer(loweredKey) Then
-                    If ContainsEditTokenValue(item) Then
-                        InspectVariantForEdit = True
-                        Exit Function
-                    End If
-                End If
-
-                If InspectVariantForEdit(item) Then
-                    InspectVariantForEdit = True
-                    Exit Function
-                End If
-            Next key
-        ElseIf TypeOf value Is Collection Then
+ContinueDictionaryLoop:
+                Next keyIndex
+            Else
+                Debug.Print "[InspectVariantForEdit] Keys enumeration did not return an array"
+            End If
+        ElseIf objectType = "Collection" Then
             Dim element As Variant
             For Each element In value
                 If InspectVariantForEdit(element) Then
@@ -482,6 +508,61 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
 
 CleanFail:
     InspectVariantForEdit = False
+End Function
+
+Private Function TryMaterializeDictionaryValue(ByVal dict As Scripting.Dictionary, ByVal key As Variant, ByRef result As Variant) As Boolean
+    If dict Is Nothing Then
+        Debug.Print "[InspectVariantForEdit] Dictionary reference was Nothing when reading key=" & KeyDebugString(key)
+        TryMaterializeDictionaryValue = False
+        Exit Function
+    End If
+
+    Dim getErr As Long
+    Dim getDesc As String
+
+    On Error Resume Next
+    result = dict.Item(key)
+    getErr = Err.Number
+    getDesc = Err.Description
+    On Error GoTo 0
+
+    If getErr = 0 Then
+        TryMaterializeDictionaryValue = True
+        Exit Function
+    End If
+
+    If getErr = 13 Or getErr = 424 Or getErr = 438 Or getErr = 450 Or getErr = 451 Then
+        Dim itemObject As Object
+        On Error Resume Next
+        Set itemObject = dict.Item(key)
+        getErr = Err.Number
+        getDesc = Err.Description
+        On Error GoTo 0
+        If getErr = 0 Then
+            Set result = itemObject
+            TryMaterializeDictionaryValue = True
+            Exit Function
+        End If
+    End If
+
+    Debug.Print "[InspectVariantForEdit] Failed to read key=" & KeyDebugString(key) & " err=" & getErr & " desc=" & getDesc
+    Err.Clear
+    TryMaterializeDictionaryValue = False
+End Function
+
+Private Function KeyDebugString(ByVal key As Variant) As String
+    On Error GoTo Failed
+
+    If IsObject(key) Then
+        KeyDebugString = TypeName(key)
+    Else
+        KeyDebugString = CStr(key)
+    End If
+    Exit Function
+
+Failed:
+    KeyDebugString = "(unprintable)"
+    Err.Clear
 End Function
 
 Private Function NormalizeTruthValue(ByVal value As Variant) As Boolean
