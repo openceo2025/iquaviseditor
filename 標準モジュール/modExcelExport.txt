@@ -29,7 +29,7 @@ End Sub
 
 Private Function CollectionCount(ByVal items As Collection) As Long
     On Error Resume Next
-    CollectionCount = items.Count
+    CollectionCount = items.count
     On Error GoTo 0
 End Function
 
@@ -45,7 +45,7 @@ Private Sub WriteHeaderAndRows(ByVal ws As Worksheet, _
 
     colIndex = 1
     For Each header In headers
-        ws.Cells(1, colIndex).Value = header
+        ws.Cells(1, colIndex).value = header
         colIndex = colIndex + 1
     Next header
 
@@ -62,9 +62,9 @@ Private Sub WriteHeaderAndRows(ByVal ws As Worksheet, _
         For Each header In headers
             If rowDict.Exists(header) Then
                 value = SanitizeCellValue(rowDict(header))
-                ws.Cells(rowIndex, colIndex).Value = value
+                ws.Cells(rowIndex, colIndex).value = value
             Else
-                ws.Cells(rowIndex, colIndex).Value = vbNullString
+                ws.Cells(rowIndex, colIndex).value = vbNullString
             End If
             colIndex = colIndex + 1
         Next header
@@ -139,3 +139,5 @@ Public Function BuildFlatRows(ByVal tasks As Variant) As Collection
 
     Set BuildFlatRows = output
 End Function
+
+
