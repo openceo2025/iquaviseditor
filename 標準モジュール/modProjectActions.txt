@@ -401,6 +401,49 @@ Private Function ContainsEditTokenText(ByVal text As String) As Boolean
     Next part
 End Function
 
+Private Function TryReadDictionaryValue(ByVal dict As Scripting.Dictionary, _
+                                        ByVal key As Variant, _
+                                        ByRef result As Variant) As Boolean
+    Dim fetched As Variant
+
+    ' CallByName(VbGet) は戻り値を Variant として返すため、配列/辞書/プリミティブを
+    ' 区別することなく一度で取得できる。既定プロパティ経由の参照でも 450 が発生しない。
+    On Error GoTo FallbackToItem
+    fetched = CallByName(dict, "Item", VbGet, key)
+    On Error GoTo 0
+    result = fetched
+    TryReadDictionaryValue = True
+    Exit Function
+
+FallbackToItem:
+    Dim callErr As Long
+    Dim callErrDesc As String
+    callErr = Err.Number
+    callErrDesc = Err.Description
+    Err.Clear
+
+    ' CallByName がサポートされない場合 (古い VBA ランタイム等) のフォールバックとして
+    ' 通常の Item アクセスを行う。ここでもエラーになった場合は呼び出し元で無視する。
+    On Error GoTo Failed
+    result = dict.Item(key)
+    On Error GoTo 0
+    TryReadDictionaryValue = True
+    Exit Function
+
+Failed:
+    Dim keyText As String
+    On Error Resume Next
+    keyText = CStr(key)
+    If Err.Number <> 0 Then
+        keyText = "<" & TypeName(key) & ">"
+        Err.Clear
+    End If
+    Debug.Print "[InspectVariantForEdit] Failed to read key=" & keyText & _
+                " err=" & Err.Number & " desc=" & Err.Description & _
+                " (CallByName err=" & callErr & ": " & callErrDesc & ")"
+    Err.Clear
+End Function
+
 Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
     On Error GoTo CleanFail
 
@@ -410,36 +453,35 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
             dictCount = value.count
             If dictCount = 0 Then Exit Function
 
-            Dim keys As Variant
-            On Error Resume Next
-            keys = value.keys
-            If Err.Number <> 0 Then
-                Debug.Print "[InspectVariantForEdit] Failed to materialize Keys (count=" & dictCount & ") err=" & Err.Number & " desc=" & Err.Description
-                Err.Clear
-                On Error GoTo CleanFail
-                Exit Function
-            End If
-            On Error GoTo CleanFail
-
-            If Not IsArray(keys) Then
-                Debug.Print "[InspectVariantForEdit] Keys not array (count=" & dictCount & ")"
-                Exit Function
-            End If
-
-            Dim key As Variant
-            For Each key In keys
-                Dim loweredKey As String
-                On Error Resume Next
-                loweredKey = LCase$(CStr(key))
-                If Err.Number <> 0 Then
-                    loweredKey = ""
-                    Err.Clear
-                End If
-                On Error GoTo CleanFail
-
                 Dim item As Variant
-                If Not TryReadDictionaryValue(value, key, item) Then
-                    GoTo ContinueDictionaryLoop
+                Dim itemObject As Object
+                Dim getErr As Long
+                Dim getErrDesc As String
+
+                ' Scripting.Dictionary の Item にはオブジェクトが格納されている場合と
+                ' プリミティブ値が格納されている場合がある。先に Set で取得を試み、
+                ' オブジェクトではないときに発生する型不一致や 450 系のエラーは値として
+                ' 取り直す。これにより API の応答に配列/辞書が含まれていても安全に走査できる。
+                On Error Resume Next
+                Set itemObject = value.Item(key)
+                getErr = Err.Number
+                getErrDesc = Err.Description
+                On Error GoTo CleanFail
+
+                If getErr = 0 Then
+                    Set item = itemObject
+                ElseIf getErr = 13 Or getErr = 91 Or getErr = 424 Or _
+                       getErr = 438 Or getErr = 450 Or getErr = 451 Then
+                    On Error Resume Next
+                    item = value.Item(key)
+                    getErr = Err.Number
+                    getErrDesc = Err.Description
+                    On Error GoTo CleanFail
+                    If getErr <> 0 Then
+                        Err.Raise getErr, "InspectVariantForEdit", getErrDesc
+                    End If
+                Else
+                    Err.Raise getErr, "InspectVariantForEdit", getErrDesc
                 End If
 
                 If KeySuggestsEdit(loweredKey) Then
@@ -462,7 +504,7 @@ Private Function InspectVariantForEdit(ByVal value As Variant) As Boolean
                     InspectVariantForEdit = True
                     Exit Function
                 End If
-ContinueDictionaryLoop:
+NextKey:
             Next key
         ElseIf TypeOf value Is Collection Then
             Dim element As Variant
@@ -494,35 +536,14 @@ CleanFail:
 End Function
 
 Private Function TryReadDictionaryValue(ByVal dict As Scripting.Dictionary, ByVal key As Variant, ByRef result As Variant) As Boolean
-    Dim itemObject As Object
-    Dim getErr As Long
-    Dim getDesc As String
+    On Error GoTo Failed
 
-    On Error Resume Next
-    Set itemObject = dict.Item(key)
-    getErr = Err.Number
-    getDesc = Err.Description
-    On Error GoTo 0
+    result = CallByName(dict, "Item", VbGet, key)
+    TryReadDictionaryValue = True
+    Exit Function
 
-    If getErr = 0 Then
-        Set result = itemObject
-        TryReadDictionaryValue = True
-        Exit Function
-    End If
-
-    If getErr = 13 Or getErr = 424 Or getErr = 438 Or getErr = 451 Then
-        On Error Resume Next
-        result = dict.Item(key)
-        getErr = Err.Number
-        getDesc = Err.Description
-        On Error GoTo 0
-        If getErr = 0 Then
-            TryReadDictionaryValue = True
-            Exit Function
-        End If
-    End If
-
-    Debug.Print "[InspectVariantForEdit] Failed to read key=" & KeyDebugString(key) & " err=" & getErr & " desc=" & getDesc
+Failed:
+    Debug.Print "[InspectVariantForEdit] Failed to read key=" & KeyDebugString(key) & " err=" & Err.Number & " desc=" & Err.Description
     Err.Clear
     TryReadDictionaryValue = False
 End Function
