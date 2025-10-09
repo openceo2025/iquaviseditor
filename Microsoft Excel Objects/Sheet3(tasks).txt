@@ -1,7 +1,5 @@
 Option Explicit
 
-Private Const SHEET_PWD As String = ""
-
 Private Sub Worksheet_Activate()
     frmProject.Hide
     frmIQuavisLauncher.Show vbModeless
@@ -13,24 +11,17 @@ End Sub
 
 ' 変更セルを黄色
 Private Sub Worksheet_Change(ByVal target As Range)
-    Dim wasProtected As Boolean
-    Dim rng As Range
-
     On Error GoTo ExitHandler
     If Intersect(target, Me.UsedRange) Is Nothing Then Exit Sub
 
-    wasProtected = (Me.ProtectContents Or Me.ProtectDrawingObjects Or Me.ProtectScenarios)
-
     Application.EnableEvents = False
-    If wasProtected Then Me.Unprotect Password:=SHEET_PWD
 
+    Dim rng As Range
     For Each rng In target.Cells
-        rng.Interior.Color = RGB(255, 255, 0)  ' ← Color に統一
+        rng.Interior.color = RGB(255, 255, 0)  ' ← Color に統一
     Next rng
 
 ExitHandler:
-    On Error Resume Next
-    If wasProtected Then Me.Protect Password:=SHEET_PWD, AllowFormattingCells:=True
     Application.EnableEvents = True
 End Sub
 
@@ -66,7 +57,7 @@ Public Sub InitializeSheetAppearance()
 
     ' 2) 行の高さを既定に
     '    StandardHeight は読み取り専用だが値は使える
-    Me.Rows.RowHeight = Me.StandardHeight
+    Me.rows.RowHeight = Me.StandardHeight
 
     ' 3) 列幅を既定に
     '    StandardWidth は設定可能（列幅の既定値そのもの）
@@ -93,16 +84,17 @@ Public Sub InitializeSheetAppearanceWithPassword(ByVal pwd As String)
     Application.ScreenUpdating = False
 
     If (Me.ProtectContents Or Me.ProtectDrawingObjects Or Me.ProtectScenarios) Then
-        Me.Unprotect Password:=pwd
+        Me.Unprotect password:=pwd
     End If
 
     Me.Cells.Interior.Pattern = xlNone
-    Me.Rows.RowHeight = Me.StandardHeight
+    Me.rows.RowHeight = Me.StandardHeight
     Me.Columns.ColumnWidth = Me.StandardWidth
 
 Finally:
     On Error Resume Next
-    Me.Protect Password:=pwd, UserInterfaceOnly:=True
+    Me.Protect password:=pwd, UserInterfaceOnly:=True
     Application.EnableEvents = prevEv
     Application.ScreenUpdating = prevScr
 End Sub
+
